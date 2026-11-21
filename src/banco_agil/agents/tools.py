@@ -12,12 +12,7 @@ from langgraph.types import Command, interrupt
 from pydantic import StrictBool, StrictFloat, StrictInt
 
 from banco_agil.agents.state import ConversationState, has_authenticated_client
-from banco_agil.domain.errors import (
-    ClientNotFoundError,
-    DomainError,
-    DomainValidationError,
-    PersistenceError,
-)
+from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.models import ExchangeQuote
 from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
@@ -61,7 +56,7 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
             return _tool_result(
                 runtime, "Informe um CPF com 11 dígitos e uma data válida no formato DD/MM/AAAA."
             )
-        except PersistenceError as exc:
+        except Exception as exc:
             logger.error("%s", type(exc).__name__)
             return _tool_result(runtime, "A autenticação está temporariamente indisponível.")
 
@@ -98,7 +93,7 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
         cpf = cast(str, runtime.state["client_cpf"])
         try:
             client = credit_service.get_client(cpf)
-        except (ClientNotFoundError, PersistenceError) as exc:
+        except Exception as exc:
             logger.error("%s", type(exc).__name__)
             return _tool_result(runtime, "A consulta de limite está temporariamente indisponível.")
         return _tool_result(runtime, f"Limite atual: R$ {client.limite_atual:.2f}.")
@@ -113,7 +108,7 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
         cpf = cast(str, runtime.state["client_cpf"])
         try:
             client = credit_service.get_client(cpf)
-        except DomainError as exc:
+        except Exception as exc:
             logger.error("%s", type(exc).__name__)
             return _tool_result(runtime, "O pedido de aumento está temporariamente indisponível.")
 
@@ -142,7 +137,7 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
 
         try:
             result = credit_service.process_limit_increase(cpf, novo_limite)
-        except DomainError as exc:
+        except Exception as exc:
             logger.error("%s", type(exc).__name__)
             return _tool_result(runtime, "Não foi possível concluir o pedido de aumento de limite.")
         if result.aprovado:
@@ -192,7 +187,7 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
                 "os dependentes devem ser 0, 1, 2 ou 3+ e as dívidas devem ser sim ou não.",
                 active_agent="entrevista",
             )
-        except (ClientNotFoundError, PersistenceError) as exc:
+        except Exception as exc:
             logger.error("%s", type(exc).__name__)
             return _tool_result(
                 runtime,
