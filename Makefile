@@ -1,4 +1,4 @@
-.PHONY: setup format test check ui
+.PHONY: setup format test check ui evals
 
 setup:
 	uv sync
@@ -19,3 +19,6 @@ check:
 
 ui:
 	uv run streamlit run src/banco_agil/ui/app.py
+
+evals:
+	uv run python -m banco_agil.evals
