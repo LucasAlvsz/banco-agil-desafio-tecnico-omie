@@ -115,7 +115,7 @@ score_final = max(0, min(1000, round(score_bruto)))
 - **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, Anthropic, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
 - **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) exibida na UI, combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
 - **Exposição e UI:** interface conversacional em **Streamlit** (modo direto em memória e modo cliente HTTP), API REST assíncrona em **FastAPI** e empacotamento com **Docker**.
-- **MCP:** servidor `FastMCP` para consulta de câmbio (stateless, sem PII) consumido pelo Agente de Câmbio via `langchain-mcp-adapters`; ferramentas autenticadas permanecem locais com `InjectedState`.
+- **MCP:** servidor `MCPServer` (`mcp` v2, stateless e sem PII) para consulta de câmbio consumido pelo Agente de Câmbio via `mcp.client.Client` atrás de `ExchangeRateProvider` (ADR 009); ferramentas autenticadas permanecem locais com `ToolRuntime`.
 
 ---
 
@@ -135,4 +135,4 @@ Escolhas intencionais para manter o MVP enxuto e seus caminhos naturais de evolu
 
 ## 7. Spikes em Aberto
 
-Nenhum spike estrutural em aberto — decisões de domínio, LLM, topologia multiagente e pontos HITL registradas em `docs/adr/001` a `docs/adr/004`.
+Nenhum spike estrutural em aberto — decisões arquiteturais do MVP registradas em `docs/adr/001` a `docs/adr/009`.

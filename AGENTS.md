@@ -11,20 +11,21 @@ banco-agil/
 ├── src/banco_agil/     # Código da aplicação (Python 3.12, mypy --strict)
 │   ├── config.py       # Settings tipadas (pydantic-settings, SecretStr)
 │   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
-│   ├── infrastructure/ # Repositórios CSV, câmbio HTTP, factory LiteLLM, privacidade LGPD e observabilidade
+│   ├── infrastructure/ # Repositórios CSV, câmbio HTTP/MCP, factory LiteLLM, privacidade LGPD e observabilidade
 │   ├── agents/         # Estado tipado, guardrails, ferramentas LangGraph e grafo conversacional
 │   ├── api/            # API REST assíncrona FastAPI (/health, /api/v1/chat)
+│   ├── mcp/            # Servidor MCP stateless de câmbio (MCPServer, stdio e streamable-http)
 │   ├── evals/          # Runner determinístico offline/live e modelos de avaliação
 │   └── ui/             # Interface conversacional Streamlit (modo direto e cliente HTTP)
-├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede)
+├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede/subprocesses)
 ├── docs/
 │   ├── spec.md         # Especificação do produto (fonte única da verdade)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
-│   ├── adr/            # Architecture Decision Records (000-template.md, 001..008)
+│   ├── adr/            # Architecture Decision Records (000-template.md, 001..009)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
-├── Dockerfile          # Imagem multi-stage (uv + Python 3.12 slim, usuário não-root)
-├── docker-compose.yml  # Orquestração local dos serviços api e ui
-├── Makefile            # Comandos padronizados de setup, API, UI, evals e verificação
+├── Dockerfile          # Imagem multi-stage (uv + Python 3.12 slim, usuário não-root, sem CSVs)
+├── docker-compose.yml  # Orquestração local dos serviços mcp-exchange, api e ui
+├── Makefile            # Comandos padronizados de setup, MCP, API, UI, evals e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest
 ```
 
@@ -35,6 +36,7 @@ banco-agil/
 - `make test` — executa `pytest` com relatório de cobertura em `src/banco_agil`.
 - `make check` — **gate obrigatório** antes de qualquer merge (`ruff check`, `ruff format --check`, `mypy src`, `pytest`).
 - `make evals` — executa a suíte determinística de avaliação ponta a ponta (`evals/scenarios.json`).
+- `make mcp-exchange` — sobe o servidor MCP stateless de câmbio em `http://127.0.0.1:8001/mcp`.
 - `make api` — sobe a API REST FastAPI em `http://localhost:8000` (`src/banco_agil/api/app.py`).
 - `make ui` — sobe a interface conversacional Streamlit (`src/banco_agil/ui/app.py`).
 
