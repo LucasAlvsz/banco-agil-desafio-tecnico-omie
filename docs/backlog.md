@@ -4,7 +4,6 @@
 *(vazio)*
 
 ## To Do
-- [ ] **F08 — Evals & Observabilidade:** dataset de cenários de avaliação (`make evals`), telemetria local (latência/tokens/custo/rota) e integração opcional com Langfuse.
 - [ ] **F09 — FastAPI & Docker:** API REST assíncrona (`/api/v1/chat`, `/health`), Streamlit em modo híbrido (direto ou via HTTP) e `Dockerfile`/`docker-compose.yml`.
 - [ ] **F10 — MCP (Câmbio):** servidor `FastMCP` de câmbio consumido pelo Agente de Câmbio via `langchain-mcp-adapters` + ADR de fronteira de segurança MCP vs. `InjectedState`.
 - [ ] **F11 — README Final & Guia de Escala:** consolidar documentação completa do sistema, diagramas de arquitetura, tutorial de execução/testes e caminhos de evolução para escala.
@@ -19,3 +18,4 @@
 - [x] **F05 — Agente de Entrevista de Crédito:** coleta dos 5 indicadores, `calcular_e_atualizar_score` (`ToolRuntime`, tipos estritos), atualização em `clientes.csv`, handoff invisível de volta ao Crédito e jornada completa ponta a ponta testada (209 testes, 99% cobertura).
 - [x] **F06 — Agente de Câmbio:** `ExchangeQuote`, `ExchangeRateProvider`, `normalize_currency_code`, `ExchangeRateClient` (`httpx.AsyncClient`, AwesomeAPI + fallback Frankfurter/BCE), `consultar_cotacao` com ponte sync→async, 274 testes (99% cobertura) e ADR 005.
 - [x] **F07 — Guardrails, Robustez e LGPD:** `privacy.py` (`mask_pii`, `mask_pii_data`, `PiiMaskingFilter`, `configure_logging`), `guardrails.py` (limites de entrada, bloqueio determinístico de *prompt injection*, `sanitize_reply`), `DEFAULT_RECURSION_LIMIT=16` com recuperação limpa de `GraphRecursionError`, escopo estrito nos prompts, 348 testes (99% cobertura) e ADR 006.
+- [x] **F08 — Evals & Observabilidade:** telemetria local por turno (`TurnTelemetry`, `TurnTelemetryCallback`, `litellm.cost_per_token`), painel na sidebar da UI, Langfuse v4 opcional com `mask` + `mask_otel_spans`, suíte declarativa `evals/scenarios.json` (`make evals`, 12/12 cenários, 0 vazamentos de PII), 366 testes (99% cobertura) e ADR 007.
