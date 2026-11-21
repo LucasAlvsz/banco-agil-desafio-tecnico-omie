@@ -6,7 +6,7 @@ from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
-from banco_agil.agents.state import ConversationState
+from banco_agil.agents.state import ConversationState, has_authenticated_client
 from banco_agil.domain.errors import DomainValidationError, PersistenceError
 from banco_agil.domain.services import CreditService
 
@@ -41,7 +41,7 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
         cpf: str, data_nascimento: str, runtime: ToolRuntime[None, ConversationState]
     ) -> Command[Any]:
         """Verifica a identidade do cliente pelo CPF e pela data de nascimento."""
-        if runtime.state.get("authenticated"):
+        if has_authenticated_client(runtime.state):
             return _tool_result(runtime, "O cliente já está autenticado.")
         try:
             client = credit_service.authenticate(cpf, data_nascimento)
@@ -70,6 +70,7 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
             authenticated=True,
             client_cpf=client.cpf,
             client_name=client.nome,
+            client_birth_date=client.data_nascimento,
             auth_attempts=0,
         )
 
@@ -79,7 +80,7 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
 def _redirect(
     runtime: ToolRuntime[None, ConversationState], agent: Literal["credito", "cambio"]
 ) -> Command[Any]:
-    if not runtime.state.get("authenticated") or not runtime.state.get("client_cpf"):
+    if not has_authenticated_client(runtime.state):
         return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
     return _tool_result(runtime, "Continue o atendimento.", active_agent=agent)
 

@@ -110,10 +110,12 @@ def test_success_resets_attempts_and_reauthentication_preserves_identity(
     assert result.authenticated and result.active_agent == "triagem"
     assert result.reply == "Olá, Ana Souza!"
     assert "client_cpf" not in result.model_dump()
+    assert "client_birth_date" not in result.model_dump()
     assert_no_personal_data(result.model_dump_json())
     state = checkpoint(graph)
     assert state["client_cpf"] == "12345678901"
     assert state["client_name"] == "Ana Souza"
+    assert state["client_birth_date"] == "1990-05-14"
     assert state["auth_attempts"] == 0
     assert tool_messages(state)[-1].content == "Cliente autenticado: Ana Souza."
     assert "autenticar_cliente" in model.calls[2]["messages"][0].text
@@ -226,6 +228,7 @@ def test_redirect_requires_authenticated_identity(
     )
     result = turn(graph)
     assert result.active_agent == "triagem"
+    assert not result.authenticated
     state = checkpoint(graph)
     assert state["active_agent"] == "triagem"
     assert tool_messages(state)[-1].content == "Autentique o cliente primeiro."
@@ -233,11 +236,17 @@ def test_redirect_requires_authenticated_identity(
 
 
 @pytest.mark.parametrize(
-    ("authenticated", "active_agent"),
-    [(False, "credito"), (True, "entrevista"), (True, "desconhecido")],
+    ("authenticated", "client_cpf", "active_agent"),
+    [
+        (False, "12345678901", "credito"),
+        (True, None, "credito"),
+        (True, "", "cambio"),
+        (True, "12345678901", "entrevista"),
+        (True, "12345678901", "desconhecido"),
+    ],
 )
 def test_entry_routes_to_triage_when_gate_or_registration_fails(
-    scripted_model, credit_service, authenticated, active_agent
+    scripted_model, credit_service, authenticated, client_cpf, active_agent
 ):
     model = scripted_model(responses=[AIMessage(content="Olá!")])
     graph = build_graph(model, credit_service)
@@ -245,13 +254,18 @@ def test_entry_routes_to_triage_when_gate_or_registration_fails(
         CONFIG,
         {
             "authenticated": authenticated,
+            "client_cpf": client_cpf,
             "active_agent": active_agent,
             "messages": [AIMessage(content="Olá!")],
         },
         as_node="triagem",
     )
-    assert turn(graph).active_agent == "triagem"
+    result = turn(graph)
+    assert result.active_agent == "triagem"
+    assert result.authenticated is bool(authenticated and client_cpf)
     assert {tool["function"]["name"] for tool in model.calls[0]["tools"]} == TRIAGE_TOOLS
+    if not result.authenticated:
+        assert "solicite CPF" in model.calls[0]["messages"][0].text
 
 
 @pytest.mark.parametrize("agent", ["credito", "cambio"])
@@ -362,14 +376,41 @@ def test_specialist_cannot_execute_triage_tool_and_errors_hide_model_input(
             tool_step(auth()),
             tool_step(call("redirecionar_para_credito", "credit")),
             tool_step(auth("blocked"), call(CPF, "unknown")),
-            AIMessage(content=f"Olá, Ana Souza. Seus dados são {CPF} e {BIRTH_DATE}."),
+            AIMessage(
+                content=f"Dados: {CPF} e {BIRTH_DATE} (1990-05-14). "
+                "Operação em 2025-11-21T14:30:00. Referência em 20/11/2025."
+            ),
         ]
     )
     graph = build_graph(model, credit_service)
     result = turn(graph)
     assert result.authenticated and result.active_agent == "credito"
-    assert result.reply == "Olá, Ana Souza. Seus dados são [dado omitido] e [dado omitido]."
+    assert result.reply == (
+        "Dados: [dado omitido] e [dado omitido] ([dado omitido]). "
+        "Operação em 2025-11-21T14:30:00. Referência em 20/11/2025."
+    )
     errors = [message for message in tool_messages(checkpoint(graph)) if message.status == "error"]
     assert [message.tool_call_id for message in errors] == ["invalid", "blocked", "unknown"]
     for error in errors:
         assert_no_personal_data(error.model_dump_json())
+
+
+@pytest.mark.parametrize("legacy_authenticated", [False, True])
+def test_dates_are_masked_without_verified_birth_date(
+    scripted_model, credit_service, legacy_authenticated
+):
+    model = scripted_model(responses=[AIMessage(content=f"Confira {CPF} e {BIRTH_DATE}.")])
+    graph = build_graph(model, credit_service)
+    if legacy_authenticated:
+        graph.update_state(
+            CONFIG,
+            {
+                "authenticated": True,
+                "client_cpf": "12345678901",
+                "messages": [AIMessage(content="Olá!")],
+            },
+            as_node="triagem",
+        )
+    result = turn(graph)
+    assert result.authenticated is legacy_authenticated
+    assert result.reply == "Confira [dado omitido] e [dado omitido]."

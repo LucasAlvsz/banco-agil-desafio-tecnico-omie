@@ -23,17 +23,20 @@ from banco_agil.agents.prompts import (
     build_exchange_placeholder_prompt,
     build_triage_prompt,
 )
-from banco_agil.agents.state import AgentName, ConversationState
+from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
 from banco_agil.agents.tools import build_triage_tools, encerrar_atendimento, voltar_para_triagem
+from banco_agil.domain.errors import DomainValidationError
+from banco_agil.domain.rules import normalize_birth_date
 from banco_agil.domain.services import CreditService
 
 logger = logging.getLogger(__name__)
 
 ENDED_REPLY = "Este atendimento já foi encerrado. Inicie uma nova conversa para continuar."
 ERROR_REPLY = "Não foi possível responder agora. Por favor, tente novamente em instantes."
-PERSONAL_DATA = re.compile(
-    r"(?<!\d)(?:[0-9](?:[.\-\s]*[0-9]){10}|"
-    r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|[0-9]{1,2}([/.-])[0-9]{1,2}\1[0-9]{4})(?!\d)"
+CPF_IN_REPLY = re.compile(r"(?<!\d)[0-9](?:[.\-\s]*[0-9]){10}(?!\d)")
+DATE_IN_REPLY = re.compile(
+    r"(?<!\d)(?:[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|"
+    r"[0-9]{1,2}([/.-])[0-9]{1,2}\1[0-9]{4})(?!\d)"
 )
 AGENT_NODES = ("triagem", "credito", "cambio")
 HANDOFF_TOOLS = {"redirecionar_para_credito", "redirecionar_para_cambio", "voltar_para_triagem"}
@@ -54,7 +57,24 @@ class TurnResult(BaseModel):
 
 def _active_agent(state: ConversationState) -> AgentName:
     active = state.get("active_agent", "triagem")
-    return active if state.get("authenticated") and active in AGENT_NODES else "triagem"
+    return active if has_authenticated_client(state) and active in AGENT_NODES else "triagem"
+
+
+def _redact_reply(reply: str, state: ConversationState) -> str:
+    reply = CPF_IN_REPLY.sub("[dado omitido]", reply)
+    birth_date = state.get("client_birth_date")
+    # Older checkpoints may lack a verified date to compare against.
+    if not has_authenticated_client(state) or not birth_date:
+        return DATE_IN_REPLY.sub("[dado omitido]", reply)
+
+    def redact_birth_date(match: re.Match[str]) -> str:
+        candidate = match.group()
+        with suppress(DomainValidationError):
+            if normalize_birth_date(candidate) == birth_date:
+                return "[dado omitido]"
+        return candidate
+
+    return DATE_IN_REPLY.sub(redact_birth_date, reply)
 
 
 def _route_agent(
@@ -163,8 +183,8 @@ def run_turn(graph: ConversationGraph, *, thread_id: str, user_message: str) -> 
         reply = ERROR_REPLY
 
     return TurnResult(
-        reply=PERSONAL_DATA.sub("[dado omitido]", reply) if reply else ERROR_REPLY,
+        reply=_redact_reply(reply, state) if reply else ERROR_REPLY,
         conversation_ended=state.get("conversation_ended", False),
         active_agent=_active_agent(state),
-        authenticated=state.get("authenticated", False),
+        authenticated=has_authenticated_client(state),
     )

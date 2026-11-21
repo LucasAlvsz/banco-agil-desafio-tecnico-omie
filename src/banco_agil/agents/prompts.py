@@ -1,4 +1,4 @@
-from banco_agil.agents.state import ConversationState
+from banco_agil.agents.state import ConversationState, has_authenticated_client
 
 BASE_PROMPT = (
     "Você é o assistente do Banco Ágil. Mantenha uma única persona cordial e objetiva "
@@ -10,7 +10,7 @@ BASE_PROMPT = (
 
 
 def build_triage_prompt(state: ConversationState) -> str:
-    if not state.get("authenticated"):
+    if not has_authenticated_client(state):
         return (
             f"{BASE_PROMPT} Recepcione o cliente e solicite CPF e data de nascimento. "
             "Aceite os dois dados juntos se já foram enviados e use autenticar_cliente "
