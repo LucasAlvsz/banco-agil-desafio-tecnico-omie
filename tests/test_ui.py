@@ -1,12 +1,15 @@
-from pathlib import Path
-
 import pytest
 from langchain_core.messages import AIMessage
 from streamlit.testing.v1 import AppTest
 
 from banco_agil.agents.graph import ERROR_REPLY
 
-APP = Path(__file__).resolve().parents[1] / "src/banco_agil/ui/app.py"
+APP = "from banco_agil.ui.app import main\nmain()"
+
+
+@pytest.fixture(autouse=True)
+def use_temporary_csvs(monkeypatch, data_dir):
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
 
 
 def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
@@ -28,10 +31,8 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
             AIMessage(content="Nova conversa!"),
         ]
     )
-    monkeypatch.setattr(
-        "banco_agil.infrastructure.llm_factory.create_chat_model", lambda settings: model
-    )
-    app = AppTest.from_file(str(APP)).run()
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda settings: model)
+    app = AppTest.from_string(APP).run()
     assert not app.exception
     first_thread = app.session_state.thread_id
     app.chat_input[0].set_value("Oi").run()
@@ -59,12 +60,12 @@ def test_ui_initialization_errors_are_friendly(monkeypatch, failure):
         raise RuntimeError("sensitive-provider-detail")
 
     target = (
-        "banco_agil.config.Settings"
+        "banco_agil.ui.app.Settings"
         if failure == "settings"
-        else "banco_agil.infrastructure.llm_factory.create_chat_model"
+        else "banco_agil.ui.app.create_chat_model"
     )
     monkeypatch.setattr(target, fail)
-    app = AppTest.from_file(str(APP)).run()
+    app = AppTest.from_string(APP).run()
     assert not app.exception
     assert "Verifique a configuração" in app.error[0].value
     assert "sensitive-provider-detail" not in app.error[0].value
@@ -73,10 +74,8 @@ def test_ui_initialization_errors_are_friendly(monkeypatch, failure):
 
 def test_ui_provider_error_is_friendly(monkeypatch, scripted_model):
     model = scripted_model(responses=[RuntimeError("sensitive-provider-detail")])
-    monkeypatch.setattr(
-        "banco_agil.infrastructure.llm_factory.create_chat_model", lambda settings: model
-    )
-    app = AppTest.from_file(str(APP)).run()
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda settings: model)
+    app = AppTest.from_string(APP).run()
     app.chat_input[0].set_value("Oi").run()
     assert not app.exception
     assert app.chat_message[-1].markdown[0].value == ERROR_REPLY

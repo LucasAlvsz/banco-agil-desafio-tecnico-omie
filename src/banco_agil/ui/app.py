@@ -4,6 +4,12 @@ import streamlit as st
 
 from banco_agil.agents.graph import build_graph, run_turn
 from banco_agil.config import Settings
+from banco_agil.domain.services import CreditService
+from banco_agil.infrastructure.csv_repositories import (
+    CsvClientRepository,
+    CsvLimitRequestRepository,
+    CsvScoreLimitRepository,
+)
 from banco_agil.infrastructure.llm_factory import create_chat_model
 
 
@@ -20,7 +26,13 @@ def main() -> None:
 
     try:
         if "graph" not in st.session_state:
-            st.session_state.graph = build_graph(create_chat_model(Settings()))
+            settings = Settings()
+            credit_service = CreditService(
+                CsvClientRepository(settings.data_dir / "clientes.csv"),
+                CsvScoreLimitRepository(settings.data_dir / "score_limite.csv"),
+                CsvLimitRequestRepository(settings.data_dir / "solicitacoes_aumento_limite.csv"),
+            )
+            st.session_state.graph = build_graph(create_chat_model(settings), credit_service)
     except Exception:
         st.error(
             "Não foi possível iniciar o atendimento. Verifique a configuração do provedor LLM."
