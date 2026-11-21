@@ -19,6 +19,23 @@ PESO_EMPREGO: dict[EmploymentType, int] = {
 }
 PESO_DEPENDENTES = {0: 100, 1: 80, 2: 60, "3+": 30}
 PESO_DIVIDAS = {"sim": -100, "não": 100}
+CURRENCY_ALIASES = {
+    "dolar": "USD",
+    "dolar americano": "USD",
+    "us$": "USD",
+    "euro": "EUR",
+    "libra": "GBP",
+    "libra esterlina": "GBP",
+    "iene": "JPY",
+    "franco": "CHF",
+    "franco suico": "CHF",
+    "peso argentino": "ARS",
+    "dolar canadense": "CAD",
+    "dolar australiano": "AUD",
+    "yuan": "CNY",
+    "renminbi": "CNY",
+    "bitcoin": "BTC",
+}
 
 
 def normalize_cpf(value: object) -> str:
@@ -50,6 +67,19 @@ def _text(value: object) -> str:
         for c in unicodedata.normalize("NFD", str(value).strip().lower())
         if unicodedata.category(c) != "Mn"
     )
+
+
+def normalize_currency_code(value: object) -> str:
+    if isinstance(value, str):
+        original = " ".join(value.split())
+        text = _text(original)
+        if text in {"brl", "real", "reais"}:
+            raise DomainValidationError("O real (BRL) já é a moeda de referência.")
+        if text in CURRENCY_ALIASES:
+            return CURRENCY_ALIASES[text]
+        if re.fullmatch(r"[A-Za-z]{3}", original):
+            return original.upper()
+    raise DomainValidationError("Informe um nome de moeda conhecido ou um código de três letras.")
 
 
 def normalize_employment(value: object) -> EmploymentType:
