@@ -11,3 +11,4 @@ evals/
 .coverage*
 htmlcov/
 **/.DS_Store
+data/

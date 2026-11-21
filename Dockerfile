@@ -13,7 +13,6 @@ ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 COPY --from=builder /app/.venv .venv
 COPY src/banco_agil/ui/app.py src/banco_agil/ui/app.py
 RUN useradd --create-home --uid 1000 appuser
-COPY --chown=appuser:appuser data/ data/
 USER appuser
 EXPOSE 8000
 CMD ["uvicorn", "banco_agil.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
