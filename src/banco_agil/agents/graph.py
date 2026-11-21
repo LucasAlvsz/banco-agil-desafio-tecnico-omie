@@ -1,3 +1,4 @@
+import logging
 from contextlib import suppress
 from typing import Any, Literal
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 from banco_agil.agents.state import ConversationState
 from banco_agil.agents.tools import encerrar_atendimento
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "Você é o assistente do Banco Ágil. Seja cordial, objetivo e fale em português, "
@@ -72,14 +75,13 @@ def run_turn(graph: ConversationGraph, *, thread_id: str, user_message: str) -> 
             return TurnResult(reply=ENDED_REPLY, conversation_ended=True)
         if not user_message.strip():
             return TurnResult(reply="Por favor, escreva uma mensagem.", conversation_ended=False)
-        state = graph.invoke(
-            {"messages": [HumanMessage(content=user_message)], "conversation_ended": False}, config
-        )
+        state = graph.invoke({"messages": [HumanMessage(content=user_message)]}, config)
         ended = bool(state.get("conversation_ended", False))
         last = state["messages"][-1]
         reply = last.text.strip() if isinstance(last, AIMessage) else ""
         return TurnResult(reply=reply or ERROR_REPLY, conversation_ended=ended)
-    except Exception:
+    except Exception as exc:
+        logger.error("Falha ao processar turno (%s)", type(exc).__name__)
         # A ferramenta pode ter encerrado a sessão antes de a despedida falhar.
         with suppress(Exception):
             ended = bool(graph.get_state(config).values.get("conversation_ended", False))

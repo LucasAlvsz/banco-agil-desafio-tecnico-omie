@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -64,10 +66,11 @@ def test_tool_command_ends_session_and_farewell_has_no_tools(scripted_model):
     assert graph.get_state({"configurable": {"thread_id": "one"}}).values["conversation_ended"]
     assert run_turn(graph, thread_id="one", user_message="Mais uma pergunta").reply == ENDED_REPLY
     assert len(model.calls) == 2
-    graph.invoke(
-        {"messages": [HumanMessage(content="Entrada direta")], "conversation_ended": True},
+    state = graph.invoke(
+        {"messages": [HumanMessage(content="Entrada direta")]},
         {"configurable": {"thread_id": "one"}},
     )
+    assert state["conversation_ended"] is True
     assert len(model.calls) == 2
 
 
@@ -80,7 +83,7 @@ def test_empty_input_does_not_call_model(scripted_model, message):
     assert model.calls == []
 
 
-def test_provider_failure_is_safe_and_retry_preserves_history(scripted_model):
+def test_provider_failure_is_safe_and_retry_preserves_history(scripted_model, caplog):
     model = scripted_model(
         responses=[RuntimeError("private-key-and-PII"), AIMessage(content="Voltei!")]
     )
@@ -88,6 +91,12 @@ def test_provider_failure_is_safe_and_retry_preserves_history(scripted_model):
     result = run_turn(graph, thread_id="one", user_message="Olá")
     assert result == TurnResult(reply=ERROR_REPLY, conversation_ended=False)
     assert "private-key-and-PII" not in result.reply
+    assert caplog.record_tuples == [
+        ("banco_agil.agents.graph", logging.ERROR, "Falha ao processar turno (RuntimeError)")
+    ]
+    assert "private-key-and-PII" not in caplog.text
+    assert caplog.records[0].exc_info is None
+    assert caplog.records[0].stack_info is None
     assert run_turn(graph, thread_id="one", user_message="Tentar de novo").reply == "Voltei!"
     assert [m.content for m in model.calls[1]["messages"][1:]] == ["Olá", "Tentar de novo"]
 
