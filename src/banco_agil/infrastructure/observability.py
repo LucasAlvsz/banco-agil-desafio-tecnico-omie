@@ -1,6 +1,8 @@
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from math import isfinite
+from threading import Lock
 from typing import TYPE_CHECKING, Any, cast, get_args
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -150,12 +152,27 @@ def langfuse_mask_otel_spans(*, params: "MaskOtelSpansParams") -> "MaskOtelSpans
 
 
 class LangfuseObservability:
-    def __init__(self, client: "Langfuse", handler: BaseCallbackHandler) -> None:
+    def __init__(
+        self,
+        client: "Langfuse",
+        handler: BaseCallbackHandler,
+        *,
+        handler_factory: Callable[[], BaseCallbackHandler] | None = None,
+    ) -> None:
         self._client = client
-        self._handler = handler
+        self._handler: BaseCallbackHandler | None = handler
+        self._handler_factory = handler_factory
+        self._handler_lock = Lock()
 
     def create_handler(self) -> BaseCallbackHandler:
-        return self._handler
+        with self._handler_lock:
+            if self._handler is not None:
+                handler = self._handler
+                if self._handler_factory is not None:
+                    self._handler = None
+                return handler
+        assert self._handler_factory is not None
+        return self._handler_factory()
 
     def flush(self) -> None:
         try:
@@ -189,7 +206,8 @@ def create_langfuse_observability(settings: Settings) -> LangfuseObservability |
             mask=langfuse_mask_data,
             mask_otel_spans=langfuse_mask_otel_spans,
         )
-        return LangfuseObservability(client, CallbackHandler(public_key=public_key))
+        handler_factory = partial(CallbackHandler, public_key=public_key)
+        return LangfuseObservability(client, handler_factory(), handler_factory=handler_factory)
     except Exception as exc:
         logger.warning("Langfuse indisponível (%s)", type(exc).__name__)
         return None
