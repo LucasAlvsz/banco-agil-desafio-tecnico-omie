@@ -1,8 +1,15 @@
+from decimal import Decimal
 from uuid import uuid4
 
 import streamlit as st
 
-from banco_agil.agents.graph import build_graph, run_turn
+from banco_agil.agents.graph import (
+    LimitIncreaseConfirmation,
+    TurnResult,
+    build_graph,
+    resume_turn,
+    run_turn,
+)
 from banco_agil.config import Settings
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.csv_repositories import (
@@ -11,6 +18,18 @@ from banco_agil.infrastructure.csv_repositories import (
     CsvScoreLimitRepository,
 )
 from banco_agil.infrastructure.llm_factory import create_chat_model
+
+
+def _format_limit(amount: float) -> str:
+    whole, _, fraction = format(Decimal(str(amount)), ",f").partition(".")
+    return f"R$ {whole.replace(',', '.')},{fraction.ljust(2, '0')}"
+
+
+def _record_reply(result: TurnResult) -> None:
+    st.session_state.history.append({"role": "assistant", "content": result.reply})
+    st.session_state.pending_confirmation = result.pending_confirmation
+    st.session_state.conversation_ended = result.conversation_ended
+    st.rerun()
 
 
 def main() -> None:
@@ -22,6 +41,7 @@ def main() -> None:
         st.session_state.thread_id = str(uuid4())
         st.session_state.history = []
         st.session_state.conversation_ended = False
+        st.session_state.pending_confirmation = None
         st.session_state.pop("graph", None)
 
     try:
@@ -46,9 +66,24 @@ def main() -> None:
     if st.session_state.conversation_ended:
         st.info("Atendimento encerrado. Clique em Nova conversa para iniciar outro atendimento.")
 
-    if prompt := st.chat_input(
-        "Como podemos ajudar?", disabled=st.session_state.conversation_ended
-    ):
+    pending: LimitIncreaseConfirmation | None = st.session_state.get("pending_confirmation")
+    if pending is not None:
+        current = _format_limit(pending.limite_atual)
+        requested = _format_limit(pending.novo_limite_solicitado)
+        st.warning(f"Limite atual **{current}** → Novo limite **{requested}**")
+        confirm = st.button("Confirmar pedido", type="primary")
+        cancel = st.button("Cancelar")
+        if confirm or cancel:
+            with st.spinner("Aguarde..."):
+                result = resume_turn(
+                    st.session_state.graph,
+                    thread_id=st.session_state.thread_id,
+                    approved=confirm and not cancel,
+                )
+            _record_reply(result)
+
+    disabled = st.session_state.conversation_ended or pending is not None
+    if (prompt := st.chat_input("Como podemos ajudar?", disabled=disabled)) and not disabled:
         st.session_state.history.append({"role": "user", "content": prompt})
         with st.spinner("Aguarde..."):
             result = run_turn(
@@ -56,9 +91,7 @@ def main() -> None:
                 thread_id=st.session_state.thread_id,
                 user_message=prompt,
             )
-        st.session_state.history.append({"role": "assistant", "content": result.reply})
-        st.session_state.conversation_ended = result.conversation_ended
-        st.rerun()
+        _record_reply(result)
 
 
 if __name__ == "__main__":
