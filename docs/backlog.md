@@ -1,10 +1,9 @@
 # Backlog Kanban — Banco Ágil
 
 ## Doing
-- [ ] **F05 — Agente de Entrevista de Crédito:** coleta das 5 variáveis, recálculo determinístico, atualização em `clientes.csv` e retorno contextual ao Crédito.
+- [ ] **F06 — Agente de Câmbio:** cliente HTTP assíncrono (`AwesomeAPI` + fallback `Frankfurter`), encerramento de tópico + ADR de integração de câmbio.
 
 ## To Do
-- [ ] **F06 — Agente de Câmbio:** cliente HTTP assíncrono (`AwesomeAPI` + fallback `Frankfurter`), encerramento de tópico + ADR de integração de câmbio.
 - [ ] **F07 — Guardrails, Robustez e LGPD:** tratamento controlado de erros, bloqueio de fora de escopo, filtro de mascaramento de PII em logs.
 - [ ] **F08 — Evals & Observabilidade:** dataset de cenários de avaliação (`make evals`), telemetria local (latência/tokens/custo/rota) e integração opcional com Langfuse.
 - [ ] **F09 — FastAPI & Docker:** API REST assíncrona (`/api/v1/chat`, `/health`), Streamlit em modo híbrido (direto ou via HTTP) e `Dockerfile`/`docker-compose.yml`.
@@ -18,3 +17,4 @@
 - [x] **Spike — Topologia Multiagente LangGraph:** análise dos padrões oficiais do LangGraph v1 e decisão registrada no ADR 003 (4 nós explícitos + `ToolNode` isolado por agente + roteador determinístico + `ToolRuntime`).
 - [x] **F03 — Agente de Triagem & Gate de Autenticação:** topologia ADR 003 (`triagem`/`credito`/`cambio` isolados), `ToolRuntime`, gate em 2 camadas (`has_authenticated_client`), 3 tentativas determinísticas, proteção em lotes paralelos, redação precisa de PII, 159 testes (99% cobertura).
 - [x] **F04 — Agente de Crédito & HITL:** consulta de limite, `solicitar_aumento_limite` com `interrupt()`/`Command(resume=...)` idempotente, UI Streamlit com botões de confirmação/cancelamento, handoff para `entrevista`, 188 testes (99% cobertura) e ADR 004.
+- [x] **F05 — Agente de Entrevista de Crédito:** coleta dos 5 indicadores, `calcular_e_atualizar_score` (`ToolRuntime`, tipos estritos), atualização em `clientes.csv`, handoff invisível de volta ao Crédito e jornada completa ponta a ponta testada (209 testes, 99% cobertura).
