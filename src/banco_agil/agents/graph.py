@@ -1,16 +1,22 @@
 import logging
-import re
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
 from typing import Any, Literal, cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -18,6 +24,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolInvocationError
 from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel, ConfigDict
 
+from banco_agil.agents.guardrails import RECURSION_LIMIT_REPLY, evaluate_user_input, sanitize_reply
 from banco_agil.agents.prompts import (
     build_credit_prompt,
     build_exchange_prompt,
@@ -33,9 +40,7 @@ from banco_agil.agents.tools import (
     encerrar_atendimento,
     voltar_para_triagem,
 )
-from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.repositories import ExchangeRateProvider
-from banco_agil.domain.rules import normalize_birth_date
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 
@@ -45,11 +50,7 @@ ENDED_REPLY = "Este atendimento já foi encerrado. Inicie uma nova conversa para
 ERROR_REPLY = "Não foi possível responder agora. Por favor, tente novamente em instantes."
 PENDING_REPLY = "Confirme ou cancele o pedido de aumento para continuar."
 NO_CONFIRMATION_REPLY = "Não há pedido de aumento aguardando confirmação."
-CPF_IN_REPLY = re.compile(r"(?<!\d)[0-9](?:[.\-\s]*[0-9]){10}(?!\d)")
-DATE_IN_REPLY = re.compile(
-    r"(?<!\d)(?:[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|"
-    r"[0-9]{1,2}([/.-])[0-9]{1,2}\1[0-9]{4})(?!\d)"
-)
+DEFAULT_RECURSION_LIMIT = 16
 AGENT_NODES = ("triagem", "credito", "entrevista", "cambio")
 HANDOFF_TOOLS = {
     "calcular_e_atualizar_score",
@@ -85,23 +86,6 @@ class TurnResult(BaseModel):
 def _active_agent(state: ConversationState) -> AgentName:
     active = state.get("active_agent", "triagem")
     return active if has_authenticated_client(state) and active in AGENT_NODES else "triagem"
-
-
-def _redact_reply(reply: str, state: ConversationState) -> str:
-    reply = CPF_IN_REPLY.sub("[dado omitido]", reply)
-    birth_date = state.get("client_birth_date")
-    # Older checkpoints may lack a verified date to compare against.
-    if not has_authenticated_client(state) or not birth_date:
-        return DATE_IN_REPLY.sub("[dado omitido]", reply)
-
-    def redact_birth_date(match: re.Match[str]) -> str:
-        candidate = match.group()
-        with suppress(DomainValidationError):
-            if normalize_birth_date(candidate) == birth_date:
-                return "[dado omitido]"
-        return candidate
-
-    return DATE_IN_REPLY.sub(redact_birth_date, reply)
 
 
 def _route_agent(
@@ -192,15 +176,24 @@ def build_graph(
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
 
 
-def run_turn(graph: ConversationGraph, *, thread_id: str, user_message: str) -> TurnResult:
-    turn_input: ConversationState | None = None
-    if user_message.strip():
-        turn_input = {"messages": [HumanMessage(content=user_message)]}
-    return _execute_turn(graph, thread_id, turn_input)
+def run_turn(
+    graph: ConversationGraph,
+    *,
+    thread_id: str,
+    user_message: str,
+    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+) -> TurnResult:
+    return _execute_turn(graph, thread_id, user_message, recursion_limit)
 
 
-def resume_turn(graph: ConversationGraph, *, thread_id: str, approved: bool) -> TurnResult:
-    return _execute_turn(graph, thread_id, Command(resume={"approved": approved}))
+def resume_turn(
+    graph: ConversationGraph,
+    *,
+    thread_id: str,
+    approved: bool,
+    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+) -> TurnResult:
+    return _execute_turn(graph, thread_id, Command(resume={"approved": approved}), recursion_limit)
 
 
 def _pending_confirmation(snapshot: StateSnapshot) -> LimitIncreaseConfirmation | None:
@@ -212,11 +205,20 @@ def _pending_confirmation(snapshot: StateSnapshot) -> LimitIncreaseConfirmation 
 
 
 def _execute_turn(
-    graph: ConversationGraph, thread_id: str, turn_input: ConversationState | Command[Any] | None
+    graph: ConversationGraph,
+    thread_id: str,
+    turn_input: str | Command[Any],
+    recursion_limit: int,
 ) -> TurnResult:
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    if recursion_limit < 2:
+        raise ValueError("recursion_limit deve ser maior ou igual a 2")
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": recursion_limit,
+    }
     state: ConversationState = {"messages": []}
     confirmation = None
+    reply: str | None
     try:
         snapshot = graph.get_state(config)
         state = cast(ConversationState, snapshot.values)
@@ -228,10 +230,20 @@ def _execute_turn(
             reply = PENDING_REPLY
         elif resuming and confirmation is None:
             reply = NO_CONFIRMATION_REPLY
-        elif turn_input is None:
-            reply = "Por favor, escreva uma mensagem."
+        elif (
+            isinstance(turn_input, str)
+            and not (decision := evaluate_user_input(turn_input)).allowed
+        ):
+            if decision.reason != "empty":
+                logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
+            reply = decision.reply
         else:
-            graph.invoke(turn_input, config)
+            invocation: ConversationState | Command[Any] = (
+                {"messages": [HumanMessage(content=turn_input.replace("\x00", "").strip())]}
+                if isinstance(turn_input, str)
+                else turn_input
+            )
+            graph.invoke(invocation, config)
             snapshot = graph.get_state(config)
             state = cast(ConversationState, snapshot.values)
             confirmation = _pending_confirmation(snapshot)
@@ -241,16 +253,32 @@ def _execute_turn(
                 last = state["messages"][-1]
                 reply = last.text.strip() if isinstance(last, AIMessage) else ""
     except Exception as exc:
-        logger.error("Falha ao processar turno (%s)", type(exc).__name__)
+        if isinstance(exc, GraphRecursionError):
+            logger.warning("Limite de passos atingido no turno (%s)", type(exc).__name__)
+            reply = RECURSION_LIMIT_REPLY
+        else:
+            logger.error("Falha ao processar turno (%s)", type(exc).__name__)
+            reply = ERROR_REPLY
         # A ferramenta pode ter encerrado a sessão antes de a despedida falhar.
         with suppress(Exception):
             snapshot = graph.get_state(config)
             state = cast(ConversationState, snapshot.values)
             confirmation = _pending_confirmation(snapshot)
-        reply = ERROR_REPLY
+            if (
+                isinstance(exc, GraphRecursionError)
+                and not snapshot.interrupts
+                and (messages := state.get("messages"))
+                and isinstance(last := messages[-1], AIMessage)
+                and last.tool_calls
+                and last.id
+            ):
+                # An odd budget or HITL resume can stop before the ToolNode runs.
+                graph.update_state(
+                    config, {"messages": [RemoveMessage(id=last.id)]}, as_node=_active_agent(state)
+                )
 
     return TurnResult(
-        reply=_redact_reply(reply, state) if reply else ERROR_REPLY,
+        reply=sanitize_reply(reply, state) if reply else ERROR_REPLY,
         conversation_ended=state.get("conversation_ended", False),
         active_agent=_active_agent(state),
         authenticated=has_authenticated_client(state),
