@@ -175,6 +175,31 @@ def test_invalid_indicators_keep_the_interview_open(
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("renda_mensal", True),
+        ("despesas_fixas", False),
+        ("num_dependentes", True),
+        ("tem_dividas", 1),
+    ],
+)
+def test_score_tool_rejects_coercion(start_interview, credit_service, monkeypatch, field, value):
+    recalculate = Mock()
+    monkeypatch.setattr(credit_service, "recalculate_score", recalculate)
+    graph, _ = start_interview(
+        tool_step(call(SCORE_TOOL, "invalid-type", **(ANSWERS | {field: value}))),
+        AIMessage(content="Pode corrigir esse dado?"),
+    )
+
+    assert turn(graph).active_agent == "entrevista"
+    assert (
+        tool_messages(graph)["invalid-type"].text
+        == "Revise os dados informados para esta operação."
+    )
+    recalculate.assert_not_called()
+
+
+@pytest.mark.parametrize(
     "method,error", [("update", PersistenceError), ("get", ClientNotFoundError)]
 )
 def test_repository_errors_are_controlled_and_private(

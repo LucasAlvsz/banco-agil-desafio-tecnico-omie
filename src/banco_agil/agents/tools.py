@@ -7,6 +7,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command, interrupt
+from pydantic import StrictBool, StrictFloat, StrictInt
 
 from banco_agil.agents.state import ConversationState, has_authenticated_client
 from banco_agil.domain.errors import (
@@ -159,11 +160,11 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
 def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
     @tool
     def calcular_e_atualizar_score(
-        renda_mensal: float,
+        renda_mensal: StrictFloat,
         tipo_emprego: str,
-        despesas_fixas: float,
-        num_dependentes: int | str,
-        tem_dividas: str | bool,
+        despesas_fixas: StrictFloat,
+        num_dependentes: StrictInt | str,
+        tem_dividas: str | StrictBool,
         runtime: ToolRuntime[None, ConversationState],
     ) -> Command[Any]:
         """Recalcula e atualiza o score do cliente autenticado com os cinco dados da entrevista."""
