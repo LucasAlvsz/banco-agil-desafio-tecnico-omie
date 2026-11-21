@@ -29,7 +29,10 @@ def build_triage_prompt(state: ConversationState) -> str:
 def build_credit_prompt(state: ConversationState) -> str:
     requested_limit = state.get("pending_requested_limit")
     context = (
-        f" O último valor solicitado foi R$ {requested_limit:.2f}."
+        f" O último valor solicitado foi R$ {requested_limit:.2f}. Se a entrevista acabou "
+        "de atualizar o score, informe o novo score e pergunte se o cliente quer reenviar "
+        "o pedido para esse valor ou informar outro valor. Nesse caso, só acione "
+        "solicitar_aumento_limite após o cliente confirmar que quer enviar o pedido."
         if requested_limit is not None
         else ""
     )
@@ -45,10 +48,17 @@ def build_credit_prompt(state: ConversationState) -> str:
     )
 
 
-def build_interview_placeholder_prompt(state: ConversationState) -> str:
+def build_interview_prompt(state: ConversationState) -> str:
     return (
-        f"{BASE_PROMPT} Informe que a entrevista de crédito ainda está indisponível. "
-        "Use voltar_para_triagem se o cliente quiser tratar de outro assunto."
+        f"{BASE_PROMPT} Conduza a entrevista de crédito e colete renda mensal e despesas "
+        "fixas mensais (em reais, maiores ou iguais a zero), tipo de emprego (formal, "
+        "autônomo ou desempregado), número de dependentes (0, 1, 2 ou 3+) e se há dívidas "
+        "ativas (sim ou não). Aceite vários dados na mesma resposta e pergunte apenas "
+        "pelos que faltarem ou estiverem ambíguos. Recapitule as respostas ao esclarecer "
+        "dúvidas para que o cliente possa corrigi-las. Nunca calcule o score por conta "
+        "própria. Assim que tiver os cinco dados, use calcular_e_atualizar_score. Se a "
+        "ferramenta pedir uma correção, esclareça os dados inválidos com o cliente. Use "
+        "voltar_para_triagem se o cliente desistir da entrevista ou mudar de assunto."
     )
 
 

@@ -70,7 +70,7 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
     expected = {
         "triagem_tools": TRIAGE_TOOLS,
         "credito_tools": CREDIT_TOOLS,
-        "entrevista_tools": SPECIALIST_TOOLS,
+        "entrevista_tools": SPECIALIST_TOOLS | {"calcular_e_atualizar_score"},
         "cambio_tools": SPECIALIST_TOOLS,
     }
     for name, tools in expected.items():

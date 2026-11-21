@@ -7,6 +7,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command, interrupt
+from pydantic import StrictBool, StrictFloat, StrictInt
 
 from banco_agil.agents.state import ConversationState, has_authenticated_client
 from banco_agil.domain.errors import (
@@ -154,6 +155,53 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
         )
 
     return [consultar_limite, solicitar_aumento_limite, redirecionar_para_entrevista]
+
+
+def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
+    @tool
+    def calcular_e_atualizar_score(
+        renda_mensal: StrictFloat,
+        tipo_emprego: str,
+        despesas_fixas: StrictFloat,
+        num_dependentes: StrictInt | str,
+        tem_dividas: str | StrictBool,
+        runtime: ToolRuntime[None, ConversationState],
+    ) -> Command[Any]:
+        """Recalcula e atualiza o score do cliente autenticado com os cinco dados da entrevista."""
+        if not has_authenticated_client(runtime.state):
+            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+        cpf = cast(str, runtime.state["client_cpf"])
+        try:
+            client = credit_service.recalculate_score(
+                cpf,
+                renda_mensal=renda_mensal,
+                despesas_fixas=despesas_fixas,
+                tipo_emprego=tipo_emprego,
+                num_dependentes=num_dependentes,
+                tem_dividas=tem_dividas,
+            )
+        except DomainValidationError:
+            return _tool_result(
+                runtime,
+                "Revise os dados da entrevista: renda e despesas devem ser valores finitos "
+                "e não negativos, o emprego deve ser formal, autônomo ou desempregado, "
+                "os dependentes devem ser 0, 1, 2 ou 3+ e as dívidas devem ser sim ou não.",
+                active_agent="entrevista",
+            )
+        except (ClientNotFoundError, PersistenceError) as exc:
+            logger.error("%s", type(exc).__name__)
+            return _tool_result(
+                runtime,
+                "A atualização do score está temporariamente indisponível.",
+                active_agent="entrevista",
+            )
+        return _tool_result(
+            runtime,
+            f"Novo score: {client.score}. Informe o novo score e retome o atendimento de crédito.",
+            active_agent="credito",
+        )
+
+    return [calcular_e_atualizar_score]
 
 
 def _redirect(

@@ -21,12 +21,13 @@ from pydantic import BaseModel, ConfigDict
 from banco_agil.agents.prompts import (
     build_credit_prompt,
     build_exchange_placeholder_prompt,
-    build_interview_placeholder_prompt,
+    build_interview_prompt,
     build_triage_prompt,
 )
 from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
 from banco_agil.agents.tools import (
     build_credit_tools,
+    build_interview_tools,
     build_triage_tools,
     encerrar_atendimento,
     voltar_para_triagem,
@@ -48,6 +49,7 @@ DATE_IN_REPLY = re.compile(
 )
 AGENT_NODES = ("triagem", "credito", "entrevista", "cambio")
 HANDOFF_TOOLS = {
+    "calcular_e_atualizar_score",
     "redirecionar_para_credito",
     "redirecionar_para_entrevista",
     "redirecionar_para_cambio",
@@ -175,11 +177,10 @@ def build_graph(
     triage_tools = [*build_triage_tools(credit_service), encerrar_atendimento]
     specialist_tools = [voltar_para_triagem, encerrar_atendimento]
     credit_tools = [*build_credit_tools(credit_service), *specialist_tools]
+    interview_tools = [*build_interview_tools(credit_service), *specialist_tools]
     _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools)
     _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools)
-    _add_agent_nodes(
-        graph, "entrevista", model, build_interview_placeholder_prompt, specialist_tools
-    )
+    _add_agent_nodes(graph, "entrevista", model, build_interview_prompt, interview_tools)
     _add_agent_nodes(graph, "cambio", model, build_exchange_placeholder_prompt, specialist_tools)
     graph.add_conditional_edges(START, partial(_route_agent, at_entry=True), [*AGENT_NODES, END])
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
