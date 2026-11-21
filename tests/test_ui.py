@@ -1,8 +1,10 @@
+import httpx
 import pytest
 from langchain_core.messages import AIMessage
 from streamlit.testing.v1 import AppTest
 
 from banco_agil.agents.graph import ERROR_REPLY
+from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 
 APP = "from banco_agil.ui.app import main\nmain()"
 
@@ -112,6 +114,51 @@ def test_ui_provider_error_is_friendly(monkeypatch, scripted_model):
     assert not app.exception
     assert app.chat_message[-1].markdown[0].value == ERROR_REPLY
     assert not app.chat_input[0].disabled
+
+
+def test_ui_uses_configured_exchange_timeout(monkeypatch, scripted_model):
+    def respond(request):
+        assert request.url.path == "/json/last/USD-BRL"
+        assert set(request.extensions["timeout"].values()) == {2.5}
+        return httpx.Response(
+            200, json={"USDBRL": {"bid": "5.25", "create_date": "2026-11-21 10:30:00"}}
+        )
+
+    model = scripted_model(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "consultar_cotacao", "args": {}, "id": "quote-ui", "type": "tool_call"}
+                ],
+            ),
+            AIMessage(content="O dólar está em R$ 5,25. Posso ajudar em outro assunto?"),
+        ]
+    )
+    monkeypatch.setenv("EXCHANGE_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda settings: model)
+    monkeypatch.setattr(
+        "banco_agil.ui.app.ExchangeRateClient",
+        lambda timeout_seconds: ExchangeRateClient(timeout_seconds, httpx.MockTransport(respond)),
+    )
+    app = AppTest.from_string(APP).run()
+    app.session_state.graph.update_state(
+        {"configurable": {"thread_id": app.session_state.thread_id}},
+        {
+            "authenticated": True,
+            "client_cpf": "12345678901",
+            "client_birth_date": "1990-05-14",
+            "active_agent": "cambio",
+            "messages": [AIMessage(content="Qual moeda você quer consultar?")],
+        },
+        as_node="triagem",
+    )
+
+    app.chat_input[0].set_value("Dólar").run()
+
+    assert not app.exception
+    assert "Compra: R$ 5,25." in model.calls[-1]["messages"][-1].text
+    assert "O dólar está em R$ 5,25." in app.chat_message[-1].markdown[0].value
 
 
 @pytest.mark.parametrize(

@@ -17,6 +17,7 @@ from banco_agil.infrastructure.csv_repositories import (
     CsvLimitRequestRepository,
     CsvScoreLimitRepository,
 )
+from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.llm_factory import create_chat_model
 
 
@@ -52,7 +53,12 @@ def main() -> None:
                 CsvScoreLimitRepository(settings.data_dir / "score_limite.csv"),
                 CsvLimitRequestRepository(settings.data_dir / "solicitacoes_aumento_limite.csv"),
             )
-            st.session_state.graph = build_graph(create_chat_model(settings), credit_service)
+            exchange_provider = ExchangeRateClient(
+                timeout_seconds=settings.exchange_timeout_seconds
+            )
+            st.session_state.graph = build_graph(
+                create_chat_model(settings), credit_service, exchange_provider=exchange_provider
+            )
     except Exception:
         st.error(
             "Não foi possível iniciar o atendimento. Verifique a configuração do provedor LLM."
