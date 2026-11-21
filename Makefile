@@ -1,4 +1,4 @@
-.PHONY: setup format test check
+.PHONY: setup format test check ui
 
 setup:
 	uv sync
@@ -16,3 +16,6 @@ check:
 	uv run ruff format --check .
 	uv run mypy src
 	uv run pytest --cov=banco_agil --cov-report=term-missing
+
+ui:
+	uv run streamlit run src/banco_agil/ui/app.py
