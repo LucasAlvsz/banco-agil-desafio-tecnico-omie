@@ -8,6 +8,10 @@
 - Tratamento de falhas inesperadas nas ferramentas de autenticação e crédito e na inicialização da UI. Os logs registram a classe da falha.
 - Estratégia e caminhos de escala registrados no [ADR 006](../../adr/006-guardrails-robustez-e-lgpd.md).
 
+## Revisão
+
+- Cross-model review aprovado de primeira (LGTM), sem ajustes de código necessários.
+
 ## Verificação
 
 - `make check` aprovado com lint, formatação, mypy estrito e 348 testes determinísticos.
