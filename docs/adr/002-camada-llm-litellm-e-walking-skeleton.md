@@ -89,18 +89,3 @@ promessa com o estado local do Streamlit.
 A suíte determinística não comprova disponibilidade, credenciais nem compatibilidade
 real de tool calling na Groq. Essa verificação requer uma chave local válida e não
 deve ser adicionada ao pytest.
-
-### Evidência local desta implementação
-
-- `make check`: Ruff, formatação e mypy strict aprovados; 137 testes passaram.
-- Cobertura: 100% em `config.py`, `llm_factory.py` e `agents/`; 92% no pacote.
-  A UI foi exercitada por quatro testes `AppTest`, embora a execução do script pelo
-  Streamlit não tenha sido contabilizada no relatório de cobertura de linhas.
-- `make ui`: servidor iniciado e `/_stcore/health` respondeu HTTP 200 (`ok`).
-- Smoke com Groq real **aprovado** em 2026-11-21, fora do pytest, com
-  `groq/openai/gpt-oss-120b` e credenciais carregadas de um `.env` local externo ao
-  worktree, sem copiar ou registrar segredos. A execução pelo grafo confirmou uma
-  saudação, `encerrar_atendimento` via `ToolNode` (com `ToolMessage` no checkpoint),
-  despedida sem tools e bloqueio de novos turnos na sessão encerrada. Um callback
-  contou três invocações do modelo, com tools vinculadas em `[True, True, False]`;
-  um turno adicional após o encerramento não aumentou essa contagem.
