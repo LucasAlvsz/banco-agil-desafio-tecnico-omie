@@ -2,15 +2,12 @@ import csv
 import os
 import tempfile
 from pathlib import Path
-from typing import TypeVar
 
 from pydantic import ValidationError
 
 from banco_agil.domain.errors import ClientNotFoundError, PersistenceError
 from banco_agil.domain.models import Client, DomainModel, LimitIncreaseRequest, ScoreLimitTier
 from banco_agil.domain.rules import normalize_cpf
-
-Model = TypeVar("Model", bound=DomainModel)
 
 
 def _read[Model: DomainModel](path: Path, model: type[Model]) -> list[Model]:
@@ -77,7 +74,10 @@ class CsvScoreLimitRepository:
         self.path = path
 
     def list_all(self) -> list[ScoreLimitTier]:
-        return _read(self.path, ScoreLimitTier)
+        tiers = _read(self.path, ScoreLimitTier)
+        if len({tier.score_minimo for tier in tiers}) != len(tiers):
+            raise PersistenceError("Degrau de score CSV duplicado")
+        return tiers
 
 
 class CsvLimitRequestRepository:

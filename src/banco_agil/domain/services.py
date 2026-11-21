@@ -1,5 +1,5 @@
 from banco_agil.domain.errors import ClientNotFoundError
-from banco_agil.domain.models import Client, LimitEvaluationResult, LimitIncreaseStatus
+from banco_agil.domain.models import Client, LimitEvaluationResult
 from banco_agil.domain.repositories import (
     ClientRepository,
     LimitRequestRepository,
@@ -40,13 +40,14 @@ class CreditService:
         client = self.get_client(cpf)
         result = evaluate_limit_increase(client, requested_limit, self.tiers.list_all())
         self.requests.append(result.pedido)
-        if result.pedido.status_pedido == LimitIncreaseStatus.APROVADO:
+        if result.aprovado:
             self.clients.update(client.model_copy(update={"limite_atual": requested_limit}))
         return result
 
     def recalculate_score(
         self,
         cpf: str,
+        *,
         renda_mensal: float,
         despesas_fixas: float,
         tipo_emprego: object,
@@ -55,7 +56,11 @@ class CreditService:
     ) -> Client:
         client = self.get_client(cpf)
         score = calculate_credit_score(
-            renda_mensal, despesas_fixas, tipo_emprego, num_dependentes, tem_dividas
+            renda_mensal=renda_mensal,
+            despesas_fixas=despesas_fixas,
+            tipo_emprego=tipo_emprego,
+            num_dependentes=num_dependentes,
+            tem_dividas=tem_dividas,
         )
         updated = client.model_copy(update={"score": score})
         self.clients.update(updated)

@@ -2,14 +2,14 @@ import csv
 from pathlib import Path
 
 import pytest
+
+from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.csv_repositories import (
     CsvClientRepository,
     CsvLimitRequestRepository,
     CsvScoreLimitRepository,
 )
-
-from banco_agil.domain.errors import DomainValidationError
 
 DATA = Path(__file__).resolve().parents[1] / "data"
 
@@ -38,7 +38,14 @@ def test_rejection_interview_approval(service, tmp_path):
     before = clients.read_bytes()
     assert service.process_limit_increase("12345678901", 6000).pedido.status_pedido == "rejeitado"
     assert clients.read_bytes() == before
-    updated = service.recalculate_score("12345678901", 5000, 2000, "clt", 0, "não")
+    updated = service.recalculate_score(
+        "12345678901",
+        renda_mensal=5000,
+        despesas_fixas=2000,
+        tipo_emprego="clt",
+        num_dependentes=0,
+        tem_dividas="não",
+    )
     assert updated.score == 575
     assert service.process_limit_increase("12345678901", 6000).pedido.status_pedido == "aprovado"
     assert service.get_client("12345678901").limite_atual == 6000
@@ -69,7 +76,13 @@ def test_real_seeds_read_only():
     ]
     ana = clients.get("12345678901")
     assert evaluate_limit_increase(ana, 6000, tiers).pedido.status_pedido == "rejeitado"
-    score = calculate_credit_score(5000, 2000, "clt", 0, "não")
+    score = calculate_credit_score(
+        renda_mensal=5000,
+        despesas_fixas=2000,
+        tipo_emprego="clt",
+        num_dependentes=0,
+        tem_dividas="não",
+    )
     assert (
         evaluate_limit_increase(
             ana.model_copy(update={"score": score}), 6000, tiers
@@ -82,3 +95,8 @@ def test_real_seeds_read_only():
         reader = csv.DictReader(stream)
         assert len(reader.fieldnames) == 5
         assert list(reader) == []
+
+
+def test_recalculate_rejects_positional_arguments(service):
+    with pytest.raises(TypeError):
+        service.recalculate_score("12345678901", 5000, 2000, "clt", 0, "não")

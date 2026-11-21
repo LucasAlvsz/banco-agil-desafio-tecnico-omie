@@ -128,3 +128,11 @@ def test_append_write_failure(tmp_path):
     repo = CsvLimitRequestRepository(tmp_path / "missing" / "requests.csv")
     with pytest.raises(PersistenceError):
         repo.append(request)
+
+
+@pytest.mark.parametrize("limits", [(1000, 1000), (1000, 7000)])
+def test_duplicate_score_tiers(tmp_path, limits):
+    path = tmp_path / "tiers.csv"
+    path.write_text(f"score_minimo,limite_maximo\n0,{limits[0]}\n0,{limits[1]}\n")
+    with pytest.raises(PersistenceError):
+        CsvScoreLimitRepository(path).list_all()

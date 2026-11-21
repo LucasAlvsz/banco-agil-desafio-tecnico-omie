@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from banco_agil.domain.errors import DomainError, DomainValidationError
-from banco_agil.domain.models import Client, ScoreLimitTier
+from banco_agil.domain.models import Client, EmploymentType, ScoreLimitTier
 from banco_agil.domain.rules import (
     calculate_credit_score,
     evaluate_limit_increase,
@@ -32,7 +32,9 @@ def tiers():
     ]
 
 
-@pytest.mark.parametrize("value", ["12345678901", "123.456.789-01"])
+@pytest.mark.parametrize(
+    "value", ["12345678901", "123.456.789-01", "123 456 789 01", "123456789-01"]
+)
 def test_cpf(value):
     assert normalize_cpf(value) == "12345678901"
 
@@ -43,7 +45,9 @@ def test_invalid_cpf(value):
         normalize_cpf(value)
 
 
-@pytest.mark.parametrize("value", ["14/05/1990", "1990-05-14", "14-05-1990", "14.05.1990"])
+@pytest.mark.parametrize(
+    "value", ["14/05/1990", "1990-05-14", "14-05-1990", "14.05.1990", " 14/05/1990 "]
+)
 def test_birth_date(value):
     assert normalize_birth_date(value) == "1990-05-14"
 
@@ -65,9 +69,13 @@ def test_invalid_date(value):
 )
 def test_employment(value, expected):
     assert normalize_employment(value) == expected
+    assert isinstance(normalize_employment(value), EmploymentType)
 
 
-@pytest.mark.parametrize("value, expected", [(0, 0), ("2", 2), (3, "3+"), (20, "3+"), ("3+", "3+")])
+@pytest.mark.parametrize(
+    "value, expected",
+    [(0, 0), ("2", 2), (3, "3+"), (20, "3+"), (" 3+ ", "3+"), (" 2 ", 2), ("3+", "3+")],
+)
 def test_dependents(value, expected):
     assert normalize_dependents(value) == expected
 
@@ -100,16 +108,31 @@ def test_unknown_category(normalizer):
     ],
 )
 def test_score(income, expenses, job, deps, debts, expected):
-    assert calculate_credit_score(income, expenses, job, deps, debts) == expected
+    assert (
+        calculate_credit_score(
+            renda_mensal=income,
+            despesas_fixas=expenses,
+            tipo_emprego=job,
+            num_dependentes=deps,
+            tem_dividas=debts,
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True])
 @pytest.mark.parametrize("field", [0, 1])
 def test_invalid_money(value, field):
-    args = [1000, 1000, "clt", 0, "não"]
-    args[field] = value
+    args = dict(
+        renda_mensal=1000,
+        despesas_fixas=1000,
+        tipo_emprego="clt",
+        num_dependentes=0,
+        tem_dividas="não",
+    )
+    args[["renda_mensal", "despesas_fixas"][field]] = value
     with pytest.raises(DomainValidationError):
-        calculate_credit_score(*args)
+        calculate_credit_score(**args)
 
 
 @pytest.mark.parametrize(
@@ -131,6 +154,7 @@ def test_evaluation(client, tiers, requested, status):
     now = datetime(2026, 1, 1, tzinfo=UTC)
     result = evaluate_limit_increase(client, requested, tiers, now)
     assert result.pedido.status_pedido == status
+    assert result.aprovado is (status == "aprovado")
     assert datetime.fromisoformat(result.pedido.data_hora_solicitacao) == now
     assert result.limite_maximo == 3000
 
@@ -164,3 +188,35 @@ def test_request_requires_timezone():
             limite_atual=2500,
             novo_limite_solicitado=6000,
         )
+
+
+def test_score_rejects_positional_arguments():
+    with pytest.raises(TypeError):
+        calculate_credit_score(5000, 2000, "clt", 0, "não")
+
+
+@pytest.mark.parametrize("status", ["pendente", "aprovado", "rejeitado"])
+def test_approval_property(status):
+    from banco_agil.domain.models import LimitEvaluationResult, LimitIncreaseRequest
+
+    request = LimitIncreaseRequest(
+        cpf_cliente="12345678901",
+        data_hora_solicitacao="2026-01-01T00:00:00+00:00",
+        limite_atual=2500,
+        novo_limite_solicitado=6000,
+        status_pedido=status,
+    )
+    result = LimitEvaluationResult(pedido=request, limite_maximo=7000)
+    assert result.aprovado is (status == "aprovado")
+    assert "aprovado" not in result.model_dump()
+
+
+def test_employment_weights_use_enum_keys():
+    from banco_agil.domain.rules import PESO_EMPREGO
+
+    assert all(isinstance(key, EmploymentType) for key in PESO_EMPREGO)
+    assert PESO_EMPREGO == {
+        EmploymentType.FORMAL: 300,
+        EmploymentType.AUTONOMO: 200,
+        EmploymentType.DESEMPREGADO: 0,
+    }

@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from banco_agil.domain.enums import EmploymentType as EmploymentType
 from banco_agil.domain.rules import normalize_birth_date, normalize_cpf
 
 
@@ -10,12 +11,6 @@ class LimitIncreaseStatus(StrEnum):
     PENDENTE = "pendente"
     APROVADO = "aprovado"
     REJEITADO = "rejeitado"
-
-
-class EmploymentType(StrEnum):
-    FORMAL = "formal"
-    AUTONOMO = "autônomo"
-    DESEMPREGADO = "desempregado"
 
 
 class DomainModel(BaseModel):
@@ -61,3 +56,7 @@ class LimitIncreaseRequest(DomainModel):
 class LimitEvaluationResult(DomainModel):
     pedido: LimitIncreaseRequest
     limite_maximo: float = Field(ge=0)
+
+    @property
+    def aprovado(self) -> bool:
+        return self.pedido.status_pedido == LimitIncreaseStatus.APROVADO

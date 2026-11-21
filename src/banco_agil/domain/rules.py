@@ -5,13 +5,18 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
+from banco_agil.domain.enums import EmploymentType
 from banco_agil.domain.errors import DomainError, DomainValidationError
 
 if TYPE_CHECKING:
     from banco_agil.domain.models import Client, LimitEvaluationResult, ScoreLimitTier
 
 PESO_RENDA = 30
-PESO_EMPREGO = {"formal": 300, "autônomo": 200, "desempregado": 0}
+PESO_EMPREGO: dict[EmploymentType, int] = {
+    EmploymentType.FORMAL: 300,
+    EmploymentType.AUTONOMO: 200,
+    EmploymentType.DESEMPREGADO: 0,
+}
 PESO_DEPENDENTES = {0: 100, 1: 80, 2: 60, "3+": 30}
 PESO_DIVIDAS = {"sim": -100, "não": 100}
 
@@ -19,13 +24,16 @@ PESO_DIVIDAS = {"sim": -100, "não": 100}
 def normalize_cpf(value: object) -> str:
     if isinstance(value, str):
         value = value.strip()
-        if re.fullmatch(r"[0-9]{11}|[0-9]{3}\.[0-9]{3}\.[0-9]{3}-[0-9]{2}", value):
-            return re.sub(r"\D", "", value)
+        if re.fullmatch(r"[0-9.\-\s]+", value):
+            digits = re.sub(r"[^0-9]", "", value)
+            if len(digits) == 11:
+                return digits
     raise DomainValidationError("CPF inválido")
 
 
 def normalize_birth_date(value: object) -> str:
     if isinstance(value, str):
+        value = value.strip()
         for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
             try:
                 parsed = datetime.strptime(value, fmt).date()
@@ -44,7 +52,7 @@ def _text(value: object) -> str:
     )
 
 
-def normalize_employment(value: object) -> str:
+def normalize_employment(value: object) -> EmploymentType:
     aliases = {
         "clt": "formal",
         "formal": "formal",
@@ -53,12 +61,14 @@ def normalize_employment(value: object) -> str:
         "desempregado": "desempregado",
     }
     try:
-        return aliases[_text(value)]
+        return EmploymentType(aliases[_text(value)])
     except KeyError:
         raise DomainValidationError("Tipo de emprego inválido") from None
 
 
 def normalize_dependents(value: object) -> int | str:
+    if isinstance(value, str):
+        value = value.strip()
     if value == "3+":
         return "3+"
     if isinstance(value, bool) or not isinstance(value, (int, str)):
@@ -88,6 +98,7 @@ def _validate_money(value: float) -> None:
 
 
 def calculate_credit_score(
+    *,
     renda_mensal: float,
     despesas_fixas: float,
     tipo_emprego: object,
