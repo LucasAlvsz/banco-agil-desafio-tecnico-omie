@@ -83,7 +83,7 @@ Seguindo `docs/adr/000-template.md`, registrar:
   6. Isolamento físico de `cambio_tools` (`consultar_cotacao`, `voltar_para_triagem`, `encerrar_atendimento`).
 
 ## Critérios de Aceite
-- [ ] `make check` 100% verde (`ruff check`, `ruff format --check`, `mypy src` strict, `pytest --cov=banco_agil`).
-- [ ] Cobertura ≥ 95% nos módulos novos (`infrastructure/exchange_client.py` e `agents/`).
-- [ ] `docs/adr/005-integracao-cambio-com-fallback.md` criado e revisado.
-- [ ] Commits pequenos em Conventional Commits na branch `feat/f06-cambio` (incluindo `plan.md`).
+- [x] `make check` 100% verde (`ruff check`, `ruff format --check`, `mypy src` strict, `pytest --cov=banco_agil`).
+- [x] Cobertura ≥ 95% nos módulos novos (`infrastructure/exchange_client.py` e `agents/`).
+- [x] `docs/adr/005-integracao-cambio-com-fallback.md` criado e revisado.
+- [x] Commits pequenos em Conventional Commits na branch `feat/f06-cambio` (incluindo `plan.md`).
