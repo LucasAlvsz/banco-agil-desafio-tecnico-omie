@@ -1,12 +1,13 @@
 import os
 
 from langchain_core.language_models import BaseChatModel
-from langchain_litellm import ChatLiteLLM
 
 from banco_agil.config import Settings
 
 
 def create_chat_model(settings: Settings) -> BaseChatModel:
+    from langchain_litellm import ChatLiteLLM
+
     for field in (
         "groq_api_key",
         "gemini_api_key",

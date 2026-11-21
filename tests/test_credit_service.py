@@ -100,3 +100,41 @@ def test_real_seeds_read_only():
 def test_recalculate_rejects_positional_arguments(service):
     with pytest.raises(TypeError):
         service.recalculate_score("12345678901", 5000, 2000, "clt", 0, "não")
+
+
+def test_concurrent_credit_updates_preserve_the_csv(service, monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from threading import Event
+
+    first_started, second_started, release = Event(), Event(), Event()
+    append = service.requests.append
+
+    def hold_first_append(request):
+        if request.novo_limite_solicitado == 11000:
+            first_started.set()
+            assert release.wait(5)
+        append(request)
+
+    def second_increase():
+        second_started.set()
+        return service.process_limit_increase("98765432100", 15000)
+
+    monkeypatch.setattr(service.requests, "append", hold_first_append)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.process_limit_increase, "98765432100", 11000)
+        try:
+            assert first_started.wait(5)
+            second = pool.submit(second_increase)
+            assert second_started.wait(5)
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.1)
+        finally:
+            release.set()
+        assert first.result().aprovado
+        assert second.result().aprovado
+    assert service.get_client("98765432100").limite_atual == 15000
+    with (tmp_path / "solicitacoes_aumento_limite.csv").open() as stream:
+        assert [float(row["limite_atual"]) for row in csv.DictReader(stream)] == [
+            first.result().pedido.limite_atual,
+            11000,
+        ]

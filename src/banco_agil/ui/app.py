@@ -6,6 +6,7 @@ import streamlit as st
 from langchain_core.callbacks import BaseCallbackHandler
 
 from banco_agil.agents.graph import (
+    ERROR_REPLY,
     LimitIncreaseConfirmation,
     TurnResult,
     build_graph,
@@ -13,6 +14,7 @@ from banco_agil.agents.graph import (
     run_turn,
 )
 from banco_agil.agents.state import AgentName
+from banco_agil.api.schemas import ChatResponse
 from banco_agil.config import Settings
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.csv_repositories import (
@@ -28,6 +30,7 @@ from banco_agil.infrastructure.observability import (
     create_langfuse_observability,
 )
 from banco_agil.infrastructure.privacy import configure_logging
+from banco_agil.ui.client import ApiClientError, HttpChatClient
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,9 @@ def _format_limit(amount: float) -> str:
 
 
 def _record_reply(result: TurnResult) -> None:
+    if isinstance(result, ChatResponse):
+        st.session_state.thread_id = result.thread_id
+        st.session_state.langfuse_enabled = result.langfuse_enabled
     st.session_state.history.append({"role": "assistant", "content": result.reply})
     st.session_state.pending_confirmation = result.pending_confirmation
     st.session_state.conversation_ended = result.conversation_ended
@@ -46,12 +52,66 @@ def _record_reply(result: TurnResult) -> None:
     st.rerun()
 
 
+def _submit_turn(*, user_message: str | None = None, approved: bool | None = None) -> None:
+    thread_id: str = st.session_state.thread_id
+    http_client: HttpChatClient | None = st.session_state.get("http_client")
+    try:
+        with st.spinner("Aguarde..."):
+            result: TurnResult
+            if http_client is not None:
+                if user_message is not None:
+                    result = http_client.send_message(
+                        thread_id=thread_id, user_message=user_message
+                    )
+                else:
+                    assert approved is not None
+                    result = http_client.resume(thread_id=thread_id, approved=approved)
+            else:
+                observability: LangfuseObservability | None = (
+                    st.session_state.langfuse_observability
+                )
+                callbacks: tuple[BaseCallbackHandler, ...] = (
+                    (observability.create_handler(),) if observability is not None else ()
+                )
+                graph = st.session_state.graph
+                model_name = st.session_state.llm_model
+                if user_message is not None:
+                    result = run_turn(
+                        graph,
+                        thread_id=thread_id,
+                        user_message=user_message,
+                        callbacks=callbacks,
+                        model_name=model_name,
+                    )
+                else:
+                    assert approved is not None
+                    result = resume_turn(
+                        graph,
+                        thread_id=thread_id,
+                        approved=approved,
+                        callbacks=callbacks,
+                        model_name=model_name,
+                    )
+    except ApiClientError as exc:
+        logger.error("Falha na comunicação com a API (%s)", type(exc).__name__)
+        st.session_state.history.append({"role": "assistant", "content": ERROR_REPLY})
+        st.rerun()
+        return
+
+    _record_reply(result)
+
+
 def _show_telemetry(
-    telemetry: TurnTelemetry | None, active_agent: AgentName, *, langfuse_enabled: bool
+    telemetry: TurnTelemetry | None,
+    active_agent: AgentName,
+    *,
+    langfuse_enabled: bool,
+    http_mode: bool,
 ) -> None:
     with st.sidebar:
         st.subheader("Telemetria do turno")
         st.caption("Langfuse ativo" if langfuse_enabled else "Local (Langfuse desativado)")
+        st.caption("API HTTP" if http_mode else "Direto (em memória)")
         st.text(f"Agente ativo: {active_agent}")
         if telemetry is not None:
             st.text(f"Rota: {' → '.join(telemetry.agent_route)}")
@@ -77,25 +137,38 @@ def main() -> None:
         st.session_state.pending_confirmation = None
         st.session_state.last_telemetry = None
         st.session_state.active_agent = "triagem"
-        for key in ("graph", "llm_model", "langfuse_observability"):
+        for key in ("graph", "llm_model", "langfuse_observability", "http_client"):
             st.session_state.pop(key, None)
 
     try:
-        if "graph" not in st.session_state:
+        if "graph" not in st.session_state and "http_client" not in st.session_state:
             settings = Settings()
-            credit_service = CreditService(
-                CsvClientRepository(settings.data_dir / "clientes.csv"),
-                CsvScoreLimitRepository(settings.data_dir / "score_limite.csv"),
-                CsvLimitRequestRepository(settings.data_dir / "solicitacoes_aumento_limite.csv"),
-            )
-            exchange_provider = ExchangeRateClient(
-                timeout_seconds=settings.exchange_timeout_seconds
-            )
-            st.session_state.llm_model = settings.llm_model
-            st.session_state.langfuse_observability = create_langfuse_observability(settings)
-            st.session_state.graph = build_graph(
-                create_chat_model(settings), credit_service, exchange_provider=exchange_provider
-            )
+            if settings.api_base_url is not None:
+                http_client = HttpChatClient(
+                    settings.api_base_url, timeout_seconds=settings.api_timeout_seconds
+                )
+                health = http_client.check_health()
+                st.session_state.langfuse_enabled = health is not None and health.langfuse_enabled
+                st.session_state.http_client = http_client
+            else:
+                credit_service = CreditService(
+                    CsvClientRepository(settings.data_dir / "clientes.csv"),
+                    CsvScoreLimitRepository(settings.data_dir / "score_limite.csv"),
+                    CsvLimitRequestRepository(
+                        settings.data_dir / "solicitacoes_aumento_limite.csv"
+                    ),
+                )
+                exchange_provider = ExchangeRateClient(
+                    timeout_seconds=settings.exchange_timeout_seconds
+                )
+                st.session_state.llm_model = settings.llm_model
+                st.session_state.langfuse_observability = create_langfuse_observability(settings)
+                st.session_state.graph = build_graph(
+                    create_chat_model(settings), credit_service, exchange_provider=exchange_provider
+                )
+                st.session_state.langfuse_enabled = (
+                    st.session_state.langfuse_observability is not None
+                )
     except Exception as exc:
         logger.error("Falha na inicialização do atendimento (%s)", type(exc).__name__)
         st.error(
@@ -103,14 +176,11 @@ def main() -> None:
         )
         st.stop()
 
-    observability: LangfuseObservability | None = st.session_state.langfuse_observability
-    callbacks: tuple[BaseCallbackHandler, ...] = (
-        (observability.create_handler(),) if observability is not None else ()
-    )
     _show_telemetry(
         st.session_state.last_telemetry,
         st.session_state.active_agent,
-        langfuse_enabled=observability is not None,
+        langfuse_enabled=st.session_state.langfuse_enabled,
+        http_mode="http_client" in st.session_state,
     )
 
     for message in st.session_state.history:
@@ -128,28 +198,12 @@ def main() -> None:
         confirm = st.button("Confirmar pedido", type="primary")
         cancel = st.button("Cancelar")
         if confirm or cancel:
-            with st.spinner("Aguarde..."):
-                result = resume_turn(
-                    st.session_state.graph,
-                    thread_id=st.session_state.thread_id,
-                    approved=confirm and not cancel,
-                    callbacks=callbacks,
-                    model_name=st.session_state.llm_model,
-                )
-            _record_reply(result)
+            _submit_turn(approved=confirm and not cancel)
 
     disabled = st.session_state.conversation_ended or pending is not None
     if (prompt := st.chat_input("Como podemos ajudar?", disabled=disabled)) and not disabled:
         st.session_state.history.append({"role": "user", "content": prompt})
-        with st.spinner("Aguarde..."):
-            result = run_turn(
-                st.session_state.graph,
-                thread_id=st.session_state.thread_id,
-                user_message=prompt,
-                callbacks=callbacks,
-                model_name=st.session_state.llm_model,
-            )
-        _record_reply(result)
+        _submit_turn(user_message=prompt)
 
 
 if __name__ == "__main__":
