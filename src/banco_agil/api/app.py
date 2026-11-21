@@ -20,8 +20,8 @@ from banco_agil.infrastructure.csv_repositories import (
     CsvLimitRequestRepository,
     CsvScoreLimitRepository,
 )
-from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.llm_factory import create_chat_model
+from banco_agil.infrastructure.mcp_exchange_client import create_exchange_provider
 from banco_agil.infrastructure.observability import (
     LangfuseObservability,
     create_langfuse_observability,
@@ -62,9 +62,7 @@ def create_app(
                     runtime_settings.data_dir / "solicitacoes_aumento_limite.csv"
                 ),
             )
-            exchange_provider = ExchangeRateClient(
-                timeout_seconds=runtime_settings.exchange_timeout_seconds
-            )
+            exchange_provider = create_exchange_provider(runtime_settings)
             runtime_graph = build_graph(
                 create_chat_model(runtime_settings),
                 credit_service,

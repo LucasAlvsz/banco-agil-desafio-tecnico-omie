@@ -1,4 +1,17 @@
 services:
+  mcp-exchange:
+    build: .
+    image: banco-agil:local
+    environment:
+      EXCHANGE_TIMEOUT_SECONDS: ${EXCHANGE_TIMEOUT_SECONDS:-8}
+    command: ["python", "-m", "banco_agil.mcp.exchange_server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8001", "--allowed-host", "mcp-exchange", "--allowed-host", "mcp-exchange:8001"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   api:
     build: .
     image: banco-agil:local
@@ -7,6 +20,13 @@ services:
     env_file:
       - path: .env
         required: false
+    depends_on:
+      mcp-exchange:
+        condition: service_healthy
+    environment:
+      EXCHANGE_TIMEOUT_SECONDS: ${EXCHANGE_TIMEOUT_SECONDS:-8}
+      MCP_EXCHANGE_TRANSPORT: streamable_http
+      MCP_EXCHANGE_URL: http://mcp-exchange:8001/mcp
     volumes:
       - ./data:/app/data
     command: ["uvicorn", "banco_agil.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

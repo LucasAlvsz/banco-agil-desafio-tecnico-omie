@@ -20,6 +20,7 @@ dependencies = [
     "langfuse>=4.0.0,<5",
     "litellm>=1.60.0",
     "streamlit>=1.42.0",
+    "mcp>=2.0.0,<3",
 ]
 
 [dependency-groups]

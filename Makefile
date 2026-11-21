@@ -1,4 +1,4 @@
-.PHONY: setup format test check ui api evals
+.PHONY: setup format test check ui api evals mcp-exchange
 
 setup:
 	uv sync
@@ -25,3 +25,6 @@ api:
 
 evals:
 	uv run python -m banco_agil.evals
+
+mcp-exchange:
+	uv run python -m banco_agil.mcp.exchange_server --transport streamable-http --host 127.0.0.1 --port 8001

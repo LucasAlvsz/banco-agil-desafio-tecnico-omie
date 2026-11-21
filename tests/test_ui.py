@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 from banco_agil.agents.graph import ERROR_REPLY
 from banco_agil.agents.guardrails import GUARDRAIL_BLOCKED_REPLY
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
+from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import LangfuseObservability
 
 APP = "from banco_agil.ui.app import main\nmain()"
@@ -178,8 +179,10 @@ def test_ui_uses_configured_exchange_timeout(monkeypatch, scripted_model):
     monkeypatch.setenv("EXCHANGE_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda settings: model)
     monkeypatch.setattr(
-        "banco_agil.ui.app.ExchangeRateClient",
-        lambda timeout_seconds: ExchangeRateClient(timeout_seconds, httpx.MockTransport(respond)),
+        "banco_agil.ui.app.create_exchange_provider",
+        lambda settings: McpExchangeRateProvider.in_memory(
+            ExchangeRateClient(settings.exchange_timeout_seconds, httpx.MockTransport(respond))
+        ),
     )
     app = AppTest.from_string(APP).run()
     app.session_state.graph.update_state(
