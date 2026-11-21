@@ -10,14 +10,14 @@ banco-agil/
 ├── src/banco_agil/     # Código da aplicação (Python 3.12, mypy --strict)
 │   ├── config.py       # Settings tipadas (pydantic-settings, SecretStr)
 │   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
-│   ├── infrastructure/ # Repositórios CSV (escrita atômica/append-only) e factory LiteLLM
+│   ├── infrastructure/ # Repositórios CSV, cliente HTTP de câmbio e factory LiteLLM
 │   ├── agents/         # Estado tipado, ferramentas LangGraph e grafo conversacional
 │   └── ui/             # Interface conversacional Streamlit
 ├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede)
 ├── docs/
 │   ├── spec.md         # Especificação do produto (fonte única da verdade)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
-│   ├── adr/            # Architecture Decision Records (000-template.md, 001..004)
+│   ├── adr/            # Architecture Decision Records (000-template.md, 001..005)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
 ├── Makefile            # Comandos padronizados de setup, UI e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest

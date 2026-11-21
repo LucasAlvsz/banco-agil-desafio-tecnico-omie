@@ -1,7 +1,7 @@
 # Backlog Kanban — Banco Ágil
 
 ## Doing
-- [ ] **F06 — Agente de Câmbio:** cliente HTTP assíncrono (`AwesomeAPI` + fallback `Frankfurter`), encerramento de tópico + ADR de integração de câmbio.
+*(vazio)*
 
 ## To Do
 - [ ] **F07 — Guardrails, Robustez e LGPD:** tratamento controlado de erros, bloqueio de fora de escopo, filtro de mascaramento de PII em logs.
@@ -18,3 +18,4 @@
 - [x] **F03 — Agente de Triagem & Gate de Autenticação:** topologia ADR 003 (`triagem`/`credito`/`cambio` isolados), `ToolRuntime`, gate em 2 camadas (`has_authenticated_client`), 3 tentativas determinísticas, proteção em lotes paralelos, redação precisa de PII, 159 testes (99% cobertura).
 - [x] **F04 — Agente de Crédito & HITL:** consulta de limite, `solicitar_aumento_limite` com `interrupt()`/`Command(resume=...)` idempotente, UI Streamlit com botões de confirmação/cancelamento, handoff para `entrevista`, 188 testes (99% cobertura) e ADR 004.
 - [x] **F05 — Agente de Entrevista de Crédito:** coleta dos 5 indicadores, `calcular_e_atualizar_score` (`ToolRuntime`, tipos estritos), atualização em `clientes.csv`, handoff invisível de volta ao Crédito e jornada completa ponta a ponta testada (209 testes, 99% cobertura).
+- [x] **F06 — Agente de Câmbio:** `ExchangeQuote`, `ExchangeRateProvider`, `normalize_currency_code`, `ExchangeRateClient` (`httpx.AsyncClient`, AwesomeAPI + fallback Frankfurter/BCE), `consultar_cotacao` com ponte sync→async, 274 testes (99% cobertura) e ADR 005.
