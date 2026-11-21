@@ -20,6 +20,29 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
                 content="",
                 tool_calls=[
                     {
+                        "name": "autenticar_cliente",
+                        "args": {"cpf": "123.456.789-01", "data_nascimento": "14/05/1990"},
+                        "id": "auth-ui",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "redirecionar_para_credito",
+                        "args": {},
+                        "id": "credit-ui",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="Ana Souza, as consultas de crédito ainda estão indisponíveis."),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
                         "name": "encerrar_atendimento",
                         "args": {"motivo": "A pedido do cliente"},
                         "id": "finish-ui",
@@ -38,11 +61,20 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
     app.chat_input[0].set_value("Oi").run()
     assert not app.exception
     assert app.chat_message[1].markdown[0].value == "Olá!"
+    app.chat_input[0].set_value("123.456.789-01, 14/05/1990. Quero consultar meu crédito.").run()
+    assert not app.exception
+    assert app.chat_message[-1].markdown[0].value == (
+        "Ana Souza, as consultas de crédito ainda estão indisponíveis."
+    )
+    state = app.session_state.graph.get_state({"configurable": {"thread_id": first_thread}}).values
+    assert state["authenticated"]
+    assert state["active_agent"] == "credito"
     app.chat_input[0].set_value("Pode encerrar").run()
     assert not app.exception
     assert app.session_state.conversation_ended
     assert app.chat_input[0].disabled
     assert app.chat_message[-1].markdown[0].value == "Até logo!"
+    assert model.calls[-1]["tools"] is None
     assert "Atendimento encerrado" in app.info[0].value
     app.sidebar.button[0].click().run()
     assert not app.exception
