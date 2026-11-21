@@ -1,13 +1,20 @@
+import json
 import logging
-from typing import Any, Literal
+from math import isfinite
+from typing import Any, Literal, cast
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 from banco_agil.agents.state import ConversationState, has_authenticated_client
-from banco_agil.domain.errors import DomainValidationError, PersistenceError
+from banco_agil.domain.errors import (
+    ClientNotFoundError,
+    DomainError,
+    DomainValidationError,
+    PersistenceError,
+)
 from banco_agil.domain.services import CreditService
 
 logger = logging.getLogger(__name__)
@@ -77,8 +84,80 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
     return [autenticar_cliente, redirecionar_para_credito, redirecionar_para_cambio]
 
 
+def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
+    @tool
+    def consultar_limite(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
+        """Consulta o limite de crédito disponível do cliente autenticado."""
+        if not has_authenticated_client(runtime.state):
+            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+        cpf = cast(str, runtime.state["client_cpf"])
+        try:
+            client = credit_service.get_client(cpf)
+        except (ClientNotFoundError, PersistenceError) as exc:
+            logger.error("%s", type(exc).__name__)
+            return _tool_result(runtime, "A consulta de limite está temporariamente indisponível.")
+        return _tool_result(runtime, f"Limite atual: R$ {client.limite_atual:.2f}.")
+
+    @tool
+    def solicitar_aumento_limite(
+        novo_limite: float, runtime: ToolRuntime[None, ConversationState]
+    ) -> Command[Any]:
+        """Solicita um novo limite em reais e abre a confirmação do cliente."""
+        if not has_authenticated_client(runtime.state):
+            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+        cpf = cast(str, runtime.state["client_cpf"])
+        try:
+            client = credit_service.get_client(cpf)
+        except DomainError as exc:
+            logger.error("%s", type(exc).__name__)
+            return _tool_result(runtime, "O pedido de aumento está temporariamente indisponível.")
+
+        if not isfinite(novo_limite) or novo_limite <= 0 or novo_limite <= client.limite_atual:
+            return _tool_result(
+                runtime,
+                json.dumps(
+                    {
+                        "erro": "O novo limite precisa ser maior que o limite atual.",
+                        "limite_atual": client.limite_atual,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        decision = interrupt(
+            {
+                "action": "confirm_limit_increase",
+                "limite_atual": client.limite_atual,
+                "novo_limite_solicitado": novo_limite,
+                "message": "Você confirma o pedido de aumento de limite?",
+            }
+        )
+        if not isinstance(decision, dict) or decision.get("approved") is not True:
+            return _tool_result(runtime, "Pedido de aumento de limite cancelado.")
+
+        try:
+            result = credit_service.process_limit_increase(cpf, novo_limite)
+        except DomainError as exc:
+            logger.error("%s", type(exc).__name__)
+            return _tool_result(runtime, "Não foi possível concluir o pedido de aumento de limite.")
+        if result.aprovado:
+            return _tool_result(
+                runtime,
+                f"Pedido aprovado. Novo limite vigente: R$ {novo_limite:.2f}.",
+                pending_requested_limit=None,
+            )
+        return _tool_result(
+            runtime,
+            "Pedido registrado como rejeitado para o score atual. "
+            "Ofereça a entrevista de crédito para reavaliar o score.",
+            pending_requested_limit=novo_limite,
+        )
+
+    return [consultar_limite, solicitar_aumento_limite, redirecionar_para_entrevista]
+
+
 def _redirect(
-    runtime: ToolRuntime[None, ConversationState], agent: Literal["credito", "cambio"]
+    runtime: ToolRuntime[None, ConversationState], agent: Literal["credito", "entrevista", "cambio"]
 ) -> Command[Any]:
     if not has_authenticated_client(runtime.state):
         return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
@@ -89,6 +168,12 @@ def _redirect(
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua o atendimento sobre crédito após a autenticação do cliente."""
     return _redirect(runtime, "credito")
+
+
+@tool
+def redirecionar_para_entrevista(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
+    """Continua para a entrevista de crédito se o cliente autenticado aceitar a oferta."""
+    return _redirect(runtime, "entrevista")
 
 
 @tool

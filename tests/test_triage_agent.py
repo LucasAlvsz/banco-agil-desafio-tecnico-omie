@@ -17,6 +17,11 @@ TRIAGE_TOOLS = {
     "encerrar_atendimento",
 }
 SPECIALIST_TOOLS = {"voltar_para_triagem", "encerrar_atendimento"}
+CREDIT_TOOLS = SPECIALIST_TOOLS | {
+    "consultar_limite",
+    "solicitar_aumento_limite",
+    "redirecionar_para_entrevista",
+}
 
 
 def call(name, call_id, **args):
@@ -64,7 +69,8 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
     nodes = graph.get_graph().nodes
     expected = {
         "triagem_tools": TRIAGE_TOOLS,
-        "credito_tools": SPECIALIST_TOOLS,
+        "credito_tools": CREDIT_TOOLS,
+        "entrevista_tools": SPECIALIST_TOOLS,
         "cambio_tools": SPECIALIST_TOOLS,
     }
     for name, tools in expected.items():
@@ -72,15 +78,16 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
         assert isinstance(node, ToolNode)
         assert set(node.tools_by_name) == tools
     assert nodes["credito_tools"].data is not nodes["cambio_tools"].data
-    assert "entrevista" not in nodes
+    assert "entrevista" in nodes
 
     expected_arguments = {
         "autenticar_cliente": {"cpf", "data_nascimento"},
         "encerrar_atendimento": {"motivo"},
+        "solicitar_aumento_limite": {"novo_limite"},
     }
     for model_call, tools in zip(
         model.calls,
-        [TRIAGE_TOOLS, TRIAGE_TOOLS, SPECIALIST_TOOLS, TRIAGE_TOOLS, SPECIALIST_TOOLS],
+        [TRIAGE_TOOLS, TRIAGE_TOOLS, CREDIT_TOOLS, TRIAGE_TOOLS, SPECIALIST_TOOLS],
         strict=True,
     ):
         definitions = [tool["function"] for tool in model_call["tools"]]
@@ -241,7 +248,7 @@ def test_redirect_requires_authenticated_identity(
         (False, "12345678901", "credito"),
         (True, None, "credito"),
         (True, "", "cambio"),
-        (True, "12345678901", "entrevista"),
+        (True, None, "entrevista"),
         (True, "12345678901", "desconhecido"),
     ],
 )
@@ -305,7 +312,7 @@ def test_parallel_auth_and_redirect_use_pre_auth_snapshot(scripted_model, credit
         responses=[
             tool_step(auth(), call("redirecionar_para_credito", "early")),
             tool_step(call("redirecionar_para_credito", "retry")),
-            AIMessage(content="Operações de crédito ainda estão indisponíveis."),
+            AIMessage(content="Como posso ajudar com seu crédito?"),
         ]
     )
     graph = build_graph(model, credit_service)
@@ -329,7 +336,7 @@ def test_parallel_duplicate_calls_keep_state_writes_and_tool_responses_consisten
                 call("redirecionar_para_credito", "credit"),
                 call("redirecionar_para_cambio", "exchange"),
             ),
-            AIMessage(content="Operações de crédito ainda estão indisponíveis."),
+            AIMessage(content="Como posso ajudar com seu crédito?"),
         ]
     )
     graph = build_graph(model, credit_service)

@@ -38,7 +38,7 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
                     }
                 ],
             ),
-            AIMessage(content="Ana Souza, as consultas de crédito ainda estão indisponíveis."),
+            AIMessage(content="Ana Souza, como posso ajudar com seu crédito?"),
             AIMessage(
                 content="",
                 tool_calls=[
@@ -64,7 +64,7 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
     app.chat_input[0].set_value("123.456.789-01, 14/05/1990. Quero consultar meu crédito.").run()
     assert not app.exception
     assert app.chat_message[-1].markdown[0].value == (
-        "Ana Souza, as consultas de crédito ainda estão indisponíveis."
+        "Ana Souza, como posso ajudar com seu crédito?"
     )
     state = app.session_state.graph.get_state({"configurable": {"thread_id": first_thread}}).values
     assert state["authenticated"]
@@ -112,3 +112,84 @@ def test_ui_provider_error_is_friendly(monkeypatch, scripted_model):
     assert not app.exception
     assert app.chat_message[-1].markdown[0].value == ERROR_REPLY
     assert not app.chat_input[0].disabled
+
+
+@pytest.mark.parametrize(
+    ("action", "reply", "amount", "formatted_amount"),
+    [
+        (
+            "Confirmar pedido",
+            "Pedido rejeitado. Quer fazer a entrevista de crédito?",
+            6000,
+            "6.000,00",
+        ),
+        ("Cancelar", "Pedido cancelado.", 6000.125, "6.000,125"),
+        ("Nova conversa", None, 6000, "6.000,00"),
+    ],
+)
+def test_ui_limit_confirmation(
+    monkeypatch, scripted_model, data_dir, action, reply, amount, formatted_amount
+):
+    responses = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "solicitar_aumento_limite",
+                    "args": {"novo_limite": amount},
+                    "id": "increase-ui",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+    ]
+    if reply is not None:
+        responses.append(AIMessage(content=reply))
+    model = scripted_model(responses=responses)
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda settings: model)
+    app = AppTest.from_string(APP).run()
+    thread = app.session_state.thread_id
+    app.session_state.graph.update_state(
+        {"configurable": {"thread_id": thread}},
+        {
+            "authenticated": True,
+            "client_cpf": "12345678901",
+            "active_agent": "credito",
+            "messages": [AIMessage(content="Como posso ajudar com seu crédito?")],
+        },
+        as_node="triagem",
+    )
+    requests = data_dir / "solicitacoes_aumento_limite.csv"
+    original = requests.read_bytes()
+
+    app.chat_input[0].set_value(f"Quero aumentar meu limite para R$ {formatted_amount}.").run()
+
+    assert not app.exception
+    assert app.chat_input[0].disabled
+    assert app.session_state.pending_confirmation.novo_limite_solicitado == amount
+    assert app.chat_message[-1].markdown[0].value == "Você confirma o pedido de aumento de limite?"
+    assert "R$ 2.500,00" in app.warning[0].value
+    assert f"R$ {formatted_amount}" in app.warning[0].value
+    buttons = {button.label: button for button in app.button}
+    assert set(buttons) == {"Nova conversa", "Confirmar pedido", "Cancelar"}
+    assert requests.read_bytes() == original
+
+    buttons[action].click().run()
+
+    assert not app.exception
+    assert app.session_state.pending_confirmation is None
+    assert not app.session_state.conversation_ended
+    assert not app.chat_input[0].disabled
+    assert not app.warning
+    assert [button.label for button in app.button] == ["Nova conversa"]
+    if action == "Nova conversa":
+        assert app.session_state.thread_id != thread
+        assert not app.chat_message
+        assert len(model.calls) == 1
+    else:
+        assert app.chat_message[-1].markdown[0].value == reply
+        assert len(model.calls) == 2
+    if action == "Confirmar pedido":
+        assert requests.read_bytes().splitlines()[-1].endswith(b",rejeitado")
+    else:
+        assert requests.read_bytes() == original

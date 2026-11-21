@@ -26,9 +26,28 @@ def build_triage_prompt(state: ConversationState) -> str:
     )
 
 
-def build_credit_placeholder_prompt(state: ConversationState) -> str:
+def build_credit_prompt(state: ConversationState) -> str:
+    requested_limit = state.get("pending_requested_limit")
+    context = (
+        f" O último valor solicitado foi R$ {requested_limit:.2f}."
+        if requested_limit is not None
+        else ""
+    )
     return (
-        f"{BASE_PROMPT} Informe que consultas e operações de crédito ainda estão indisponíveis. "
+        f"{BASE_PROMPT}{context} Use consultar_limite para informar o limite de crédito atual. "
+        "Ao concluir a consulta, pergunte se pode ajudar em outro assunto e use "
+        "voltar_para_triagem quando o tópico terminar. Para aumentar o limite, colete o novo "
+        "valor desejado e use solicitar_aumento_limite. A própria ferramenta solicita "
+        "a confirmação do cliente. Informe o resultado do pedido. Em caso de rejeição, "
+        "ofereça uma entrevista para reavaliar o score. Se o cliente aceitar, use "
+        "redirecionar_para_entrevista. Se recusar, ofereça ajuda em outro assunto e use "
+        "voltar_para_triagem quando o tópico terminar."
+    )
+
+
+def build_interview_placeholder_prompt(state: ConversationState) -> str:
+    return (
+        f"{BASE_PROMPT} Informe que a entrevista de crédito ainda está indisponível. "
         "Use voltar_para_triagem se o cliente quiser tratar de outro assunto."
     )
 

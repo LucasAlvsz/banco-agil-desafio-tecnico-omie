@@ -15,6 +15,7 @@ class ConversationState(TypedDict):
     client_birth_date: NotRequired[str]
     auth_attempts: NotRequired[int]
     conversation_ended: NotRequired[bool]
+    pending_requested_limit: NotRequired[float | None]
 
 
 def has_authenticated_client(state: ConversationState) -> bool:
