@@ -1,3 +1,4 @@
+import logging
 import socket
 
 import pytest
@@ -39,6 +40,20 @@ def isolated_settings(monkeypatch):
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     for field in Settings.model_fields:
         monkeypatch.delenv(field.upper(), raising=False)
+
+
+@pytest.fixture
+def isolated_logging(monkeypatch):
+    loggers = (logging.getLogger(), logging.getLogger("banco_agil"))
+    with monkeypatch.context() as patch:
+        for logger in loggers:
+            patch.setattr(logger, "level", logger.level)
+            patch.setattr(logger, "handlers", logger.handlers.copy())
+            for handler in logger.handlers:
+                patch.setattr(handler, "filters", handler.filters.copy())
+        yield
+    for logger in loggers:
+        logger.setLevel(logger.level)
 
 
 class ScriptedChatModel(BaseChatModel):
