@@ -4,7 +4,7 @@
 *(vazio)*
 
 ## To Do
-- [ ] **F11 — README Final & Guia de Escala:** consolidar documentação completa do sistema, diagramas de arquitetura, tutorial de execução/testes e caminhos de evolução para escala.
+*(vazio)*
 
 ## Done
 - [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
@@ -19,3 +19,4 @@
 - [x] **F08 — Evals & Observabilidade:** telemetria local por turno (`TurnTelemetry`, `TurnTelemetryCallback`, `litellm.cost_per_token`), painel na sidebar da UI, Langfuse v4 opcional com `mask` + `mask_otel_spans`, suíte declarativa `evals/scenarios.json` (`make evals`, 12/12 cenários, 0 vazamentos de PII), 366 testes (99% cobertura) e ADR 007.
 - [x] **F09 — FastAPI & Docker:** API REST assíncrona (`/health`, `/api/v1/chat`, `lifespan`, `asyncio.to_thread`, lock por `thread_id`, `CreditService._write_lock`, `StrictBool` HITL, handlers 422/500 sem PII), Streamlit híbrido (`API_BASE_URL` / `HttpChatClient`), `Dockerfile` multi-stage (`uv:0.10`, não-root) + `docker-compose.yml`, 406 testes (99% cobertura) e ADR 008.
 - [x] **F10 — MCP (Câmbio):** servidor MCP stateless `MCPServer` (`mcp` v2.3.0, `stdio`/`streamable-http` com `TransportSecuritySettings`), cliente `McpExchangeRateProvider` via `mcp.client.Client` (`inmemory`/`stdio`/`streamable_http`), isolamento físico sem `./data` no serviço `mcp-exchange` do Compose, 438 testes (99% cobertura) e ADR 009.
+- [x] **F11 — README Final & Guia de Escala:** `README.md` consolidado com visão geral, 2 diagramas Mermaid, funcionalidades, problemas técnicos e soluções, tabela de ADRs `001`–`009`, tutorial de execução/testes (local, API, MCP e Docker Compose) e guia de evolução para produção na AWS (20/20 links válidos).
