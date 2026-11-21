@@ -3,6 +3,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import streamlit as st
+from langchain_core.callbacks import BaseCallbackHandler
 
 from banco_agil.agents.graph import (
     LimitIncreaseConfirmation,
@@ -11,6 +12,7 @@ from banco_agil.agents.graph import (
     resume_turn,
     run_turn,
 )
+from banco_agil.agents.state import AgentName
 from banco_agil.config import Settings
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.csv_repositories import (
@@ -20,6 +22,11 @@ from banco_agil.infrastructure.csv_repositories import (
 )
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.llm_factory import create_chat_model
+from banco_agil.infrastructure.observability import (
+    LangfuseObservability,
+    TurnTelemetry,
+    create_langfuse_observability,
+)
 from banco_agil.infrastructure.privacy import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -34,7 +41,27 @@ def _record_reply(result: TurnResult) -> None:
     st.session_state.history.append({"role": "assistant", "content": result.reply})
     st.session_state.pending_confirmation = result.pending_confirmation
     st.session_state.conversation_ended = result.conversation_ended
+    st.session_state.last_telemetry = result.telemetry
+    st.session_state.active_agent = result.active_agent
     st.rerun()
+
+
+def _show_telemetry(
+    telemetry: TurnTelemetry | None, active_agent: AgentName, *, langfuse_enabled: bool
+) -> None:
+    with st.sidebar:
+        st.subheader("Telemetria do turno")
+        st.caption("Langfuse ativo" if langfuse_enabled else "Local (Langfuse desativado)")
+        st.text(f"Agente ativo: {active_agent}")
+        if telemetry is not None:
+            st.text(f"Rota: {' → '.join(telemetry.agent_route)}")
+            st.text(f"Latência: {telemetry.latency_ms:.1f} ms")
+            st.text(
+                f"Tokens: {telemetry.input_tokens} entrada, "
+                f"{telemetry.output_tokens} saída, {telemetry.total_tokens} total"
+            )
+            cost = telemetry.estimated_cost_usd
+            st.text(f"Custo estimado: {'N/D' if cost is None else f'US$ {cost:.6f}'}")
 
 
 def main() -> None:
@@ -48,7 +75,10 @@ def main() -> None:
         st.session_state.history = []
         st.session_state.conversation_ended = False
         st.session_state.pending_confirmation = None
-        st.session_state.pop("graph", None)
+        st.session_state.last_telemetry = None
+        st.session_state.active_agent = "triagem"
+        for key in ("graph", "llm_model", "langfuse_observability"):
+            st.session_state.pop(key, None)
 
     try:
         if "graph" not in st.session_state:
@@ -61,6 +91,8 @@ def main() -> None:
             exchange_provider = ExchangeRateClient(
                 timeout_seconds=settings.exchange_timeout_seconds
             )
+            st.session_state.llm_model = settings.llm_model
+            st.session_state.langfuse_observability = create_langfuse_observability(settings)
             st.session_state.graph = build_graph(
                 create_chat_model(settings), credit_service, exchange_provider=exchange_provider
             )
@@ -70,6 +102,16 @@ def main() -> None:
             "Não foi possível iniciar o atendimento. Verifique a configuração do provedor LLM."
         )
         st.stop()
+
+    observability: LangfuseObservability | None = st.session_state.langfuse_observability
+    callbacks: tuple[BaseCallbackHandler, ...] = (
+        (observability.create_handler(),) if observability is not None else ()
+    )
+    _show_telemetry(
+        st.session_state.last_telemetry,
+        st.session_state.active_agent,
+        langfuse_enabled=observability is not None,
+    )
 
     for message in st.session_state.history:
         with st.chat_message(message["role"]):
@@ -91,6 +133,8 @@ def main() -> None:
                     st.session_state.graph,
                     thread_id=st.session_state.thread_id,
                     approved=confirm and not cancel,
+                    callbacks=callbacks,
+                    model_name=st.session_state.llm_model,
                 )
             _record_reply(result)
 
@@ -102,6 +146,8 @@ def main() -> None:
                 st.session_state.graph,
                 thread_id=st.session_state.thread_id,
                 user_message=prompt,
+                callbacks=callbacks,
+                model_name=st.session_state.llm_model,
             )
         _record_reply(result)
 

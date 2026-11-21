@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     aws_secret_access_key: SecretStr | None = None
     aws_region_name: SecretStr | None = None
 
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str | None = None
+    langfuse_host: str | None = Field(default=None, exclude=True, repr=False)
+
     @field_validator("llm_model")
     @classmethod
     def validate_model(cls, value: str) -> str:
