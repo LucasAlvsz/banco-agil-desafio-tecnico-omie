@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/.*_cache
+.env
+.env.*
+!.env.example
+tests/
+docs/
+evals/
+.coverage*
+htmlcov/
+**/.DS_Store
