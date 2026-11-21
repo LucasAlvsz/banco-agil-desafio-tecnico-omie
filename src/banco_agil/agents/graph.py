@@ -20,21 +20,24 @@ from pydantic import BaseModel, ConfigDict
 
 from banco_agil.agents.prompts import (
     build_credit_prompt,
-    build_exchange_placeholder_prompt,
+    build_exchange_prompt,
     build_interview_prompt,
     build_triage_prompt,
 )
 from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
 from banco_agil.agents.tools import (
     build_credit_tools,
+    build_exchange_tools,
     build_interview_tools,
     build_triage_tools,
     encerrar_atendimento,
     voltar_para_triagem,
 )
 from banco_agil.domain.errors import DomainValidationError
+from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.rules import normalize_birth_date
 from banco_agil.domain.services import CreditService
+from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +174,7 @@ def _add_agent_nodes(
 def build_graph(
     model: BaseChatModel,
     credit_service: CreditService,
+    exchange_provider: ExchangeRateProvider | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> ConversationGraph:
     graph = StateGraph(ConversationState)
@@ -178,10 +182,12 @@ def build_graph(
     specialist_tools = [voltar_para_triagem, encerrar_atendimento]
     credit_tools = [*build_credit_tools(credit_service), *specialist_tools]
     interview_tools = [*build_interview_tools(credit_service), *specialist_tools]
+    provider = exchange_provider if exchange_provider is not None else ExchangeRateClient()
+    exchange_tools = [*build_exchange_tools(provider), *specialist_tools]
     _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools)
     _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools)
     _add_agent_nodes(graph, "entrevista", model, build_interview_prompt, interview_tools)
-    _add_agent_nodes(graph, "cambio", model, build_exchange_placeholder_prompt, specialist_tools)
+    _add_agent_nodes(graph, "cambio", model, build_exchange_prompt, exchange_tools)
     graph.add_conditional_edges(START, partial(_route_agent, at_entry=True), [*AGENT_NODES, END])
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
 

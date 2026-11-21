@@ -17,6 +17,7 @@ TRIAGE_TOOLS = {
     "encerrar_atendimento",
 }
 SPECIALIST_TOOLS = {"voltar_para_triagem", "encerrar_atendimento"}
+EXCHANGE_TOOLS = SPECIALIST_TOOLS | {"consultar_cotacao"}
 CREDIT_TOOLS = SPECIALIST_TOOLS | {
     "consultar_limite",
     "solicitar_aumento_limite",
@@ -60,7 +61,7 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
             tool_step(call("redirecionar_para_credito", "credit")),
             tool_step(call("voltar_para_triagem", "back")),
             tool_step(call("redirecionar_para_cambio", "exchange")),
-            AIMessage(content="Consultas de câmbio ainda estão indisponíveis."),
+            AIMessage(content="Qual moeda você quer consultar?"),
         ]
     )
     graph = build_graph(model, credit_service)
@@ -71,7 +72,7 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
         "triagem_tools": TRIAGE_TOOLS,
         "credito_tools": CREDIT_TOOLS,
         "entrevista_tools": SPECIALIST_TOOLS | {"calcular_e_atualizar_score"},
-        "cambio_tools": SPECIALIST_TOOLS,
+        "cambio_tools": EXCHANGE_TOOLS,
     }
     for name, tools in expected.items():
         node = nodes[name].data
@@ -82,12 +83,13 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
 
     expected_arguments = {
         "autenticar_cliente": {"cpf", "data_nascimento"},
+        "consultar_cotacao": {"moeda"},
         "encerrar_atendimento": {"motivo"},
         "solicitar_aumento_limite": {"novo_limite"},
     }
     for model_call, tools in zip(
         model.calls,
-        [TRIAGE_TOOLS, TRIAGE_TOOLS, CREDIT_TOOLS, TRIAGE_TOOLS, SPECIALIST_TOOLS],
+        [TRIAGE_TOOLS, TRIAGE_TOOLS, CREDIT_TOOLS, TRIAGE_TOOLS, EXCHANGE_TOOLS],
         strict=True,
     ):
         definitions = [tool["function"] for tool in model_call["tools"]]

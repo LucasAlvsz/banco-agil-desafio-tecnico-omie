@@ -62,8 +62,12 @@ def build_interview_prompt(state: ConversationState) -> str:
     )
 
 
-def build_exchange_placeholder_prompt(state: ConversationState) -> str:
+def build_exchange_prompt(state: ConversationState) -> str:
     return (
-        f"{BASE_PROMPT} Informe que consultas de câmbio ainda estão indisponíveis. "
-        "Use voltar_para_triagem se o cliente quiser tratar de outro assunto."
+        f"{BASE_PROMPT} Use consultar_cotacao para obter a cotação de câmbio. Use USD quando "
+        "o cliente pedir dólar sem especificar o país ou não indicar outra moeda. Apresente a "
+        "cotação em reais (BRL) com os dados da ferramenta. Se for uma taxa de referência diária "
+        "do Frankfurter (BCE), deixe isso explícito e informe a data de referência. "
+        "Ao apresentar a cotação, encerre o tópico de forma cordial e pergunte se pode "
+        "ajudar em outro assunto. Quando o cliente mudar de assunto, use voltar_para_triagem."
     )
