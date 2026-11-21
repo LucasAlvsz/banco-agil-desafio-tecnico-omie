@@ -1,13 +1,17 @@
 # Plano — F10: Servidor MCP de Câmbio e Fronteira de Segurança
 
 ## Objetivo
-Isolar a consulta de câmbio em um **servidor MCP stateless e sem PII** construído sobre o SDK oficial `mcp` v2 (`MCPServer`, sucessor do `FastMCP` na v2.3.0) e consumi-lo no Agente de Câmbio via **`langchain-mcp-adapters`** (`MultiServerMCPClient` e `load_mcp_tools`), preservando todas as ferramentas autenticadas/PII localmente no grafo com `ToolRuntime` e documentando a fronteira de segurança no **ADR 009**.
+Isolar a consulta de câmbio em um **servidor MCP stateless e sem PII** construído sobre o SDK oficial `mcp` v2 (`MCPServer`, sucessor do `FastMCP` na v2.3.0) e consumi-lo no Agente de Câmbio via **`Client` do SDK oficial do MCP**, preservando todas as ferramentas autenticadas/PII localmente no grafo com `ToolRuntime` e documentando a fronteira de segurança no **ADR 009**.
 
 ## Dependências (`pyproject.toml`)
 - Declarar explicitamente em `[project].dependencies`:
   - `mcp>=2.0.0,<3` *(já presente transitivamente na versão `2.3.0`; no `mcp` v2, a classe `FastMCP` foi renomeada para `MCPServer` em `mcp.server` / `mcp.server.mcpserver` — `mcp.server.fastmcp` não existe mais)*
-  - `langchain-mcp-adapters>=0.3.0` *(verificada compatível com `mcp==2.3.0`)*
 - Rodar `uv sync` no worktree para atualizar `uv.lock`.
+
+A implementação confirmou que `langchain-mcp-adapters` 0.3.1 falha ao importar
+com `mcp==2.3.0` e que a versão 0.3.2 exige `mcp<2`. O cliente oficial
+substitui a integração prevista com o adaptador e mantém os três transportes.
+[Incompatibilidade de importação](https://github.com/langchain-ai/langchain-mcp-adapters/issues/589) · [Dependências da versão 0.3.2](https://pypi.org/pypi/langchain-mcp-adapters/0.3.2/json).
 
 ## Escopo
 
@@ -28,25 +32,27 @@ Isolar a consulta de câmbio em um **servidor MCP stateless e sem PII** constru�
   - Para `streamable-http`: passa opções de transporte **no método `server.run(...)`** (nunca no construtor `MCPServer(...)`, conforme API do `mcp` v2.3.0), com `stateless_http=True`, `json_response=True` e `transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=[...])` (incluindo `127.0.0.1:*`, `localhost:*`, `[::1]:*` e os hosts extras informados via `--allowed-host`, evitando `421 Misdirected Request` no Docker Compose sem desabilitar a proteção contra DNS rebinding!).
   - **`run()` estritamente sob `if __name__ == "__main__":`** (import sem efeitos colaterais).
 
-### 2. Cliente MCP via `langchain-mcp-adapters` (`src/banco_agil/infrastructure/mcp_exchange_client.py`)
-- Implementar `McpExchangeRateProvider` cumprindo integralmente o `Protocol` de domínio **`ExchangeRateProvider`** (`async def get_quote(self, currency: str = "USD") -> ExchangeQuote`):
-  - **Por que adaptar o protocolo MCP atrás de `ExchangeRateProvider`:**
-    1. O Agente de Câmbio (`consultar_cotacao` em `agents/tools.py`) **mantém** o gate de autenticação em código via `ToolRuntime` (`has_authenticated_client(runtime.state)`), a defesa em profundidade em 2 camadas (roteador + ferramenta) e a formatação determinística em português (incluindo data de referência do BCE).
-    2. Toda consulta de câmbio executa o **protocolo MCP real via `langchain-mcp-adapters`**, descobrindo e invocando a ferramenta remota `consultar_cotacao_cambio` e revalidando a resposta no modelo de domínio imutável `ExchangeQuote`!
-  - **Três modos de transporte MCP suportados:**
-    1. **`inmemory` (padrão local — zero subprocesso, zero socket, protocolo MCP real):** conecta a uma instância `MCPServer` via `mcp.client.Client(server)` e carrega a ferramenta LangChain via `await load_mcp_tools(client.session, handle_tool_errors=False)` de `langchain_mcp_adapters.tools`.
-    2. **`stdio` (subprocesso local):** usa `MultiServerMCPClient({"exchange": {"transport": "stdio", "command": sys.executable, "args": ["-m", "banco_agil.mcp.exchange_server", "--transport", "stdio"]}})` e `async with client.session("exchange") as session: tools = await load_mcp_tools(session, handle_tool_errors=False)`.
-    3. **`streamable_http` (serviço HTTP MCP dedicado — usado no Docker Compose):** usa `MultiServerMCPClient({"exchange": {"transport": "streamable_http", "url": url, "timeout": timeout_seconds}})` e `async with client.session("exchange") as session: tools = await load_mcp_tools(session, handle_tool_errors=False)`.
-  - **Conversão de resultado e erros:**
-    - Valida localmente a moeda com `normalize_currency_code(currency)`? **Não** antes de chamar o servidor — ou deixar o servidor validar para exercitar o fluxo de erro MCP (`INVALID_CURRENCY:` → `DomainValidationError`)! (Validar no servidor comprova o tratamento de erro `isError=True` / `ToolException` ponta a ponta; se a entrada não for string/estiver vazia, o servidor devolve `INVALID_CURRENCY:`.)
-    - Localiza a ferramenta `consultar_cotacao_cambio` retornada por `load_mcp_tools`, executa `await mcp_tool.ainvoke({"moeda": currency})`, interpreta a resposta (dict, JSON em string ou lista de blocos de texto `[{"type": "text", "text": "..."}]` retornada por `langchain-mcp-adapters`) e valida com `ExchangeQuote.model_validate(...)`.
-    - Em `ToolException as exc`: se a mensagem iniciar com `"INVALID_CURRENCY:"`, extrai a orientação limpa e levanta `DomainValidationError(...) from None`; caso contrário registra `logger.error("Falha na chamada MCP de câmbio (%s)", type(exc).__name__)` e levanta `ExchangeServiceError("Não foi possível consultar a cotação no momento.") from None`.
-    - Em erro de transporte/sessão/JSON inválido/ferramenta ausente: registra apenas `type(exc).__name__` e levanta `ExchangeServiceError("Não foi possível consultar a cotação no momento.") from None`.
-- **Factory de provedor (`create_exchange_provider(settings: Settings) -> ExchangeRateProvider`):**
-  - Lê `settings.mcp_exchange_transport` (`"inmemory"` | `"stdio"` | `"streamable_http"`):
-    - `"inmemory"` (padrão): cria `McpExchangeRateProvider.in_memory(timeout_seconds=settings.exchange_timeout_seconds)`.
-    - `"stdio"`: cria `McpExchangeRateProvider.stdio(timeout_seconds=settings.exchange_timeout_seconds)`.
-    - `"streamable_http"`: exige `settings.mcp_exchange_url` preenchido e cria `McpExchangeRateProvider.streamable_http(url=settings.mcp_exchange_url, timeout_seconds=settings.exchange_timeout_seconds)`.
+### 2. Cliente MCP (`src/banco_agil/infrastructure/mcp_exchange_client.py`)
+
+Implementar `McpExchangeRateProvider` com `async def get_quote(self, currency: str = "USD") -> ExchangeQuote`.
+A ferramenta local `consultar_cotacao` mantém o gate de autenticação e formata a
+resposta, incluindo a data de referência do BCE. O provedor abre uma sessão MCP,
+descobre `consultar_cotacao_cambio` e envia somente `moeda`. Se o mascaramento
+identificar dado sensível no campo, envia uma string vazia para que a validação
+de domínio devolva a mensagem controlada.
+
+- **`inmemory` (padrão).** Usa `Client(server)` com um `MCPServer` em processo, sem subprocessos ou sockets.
+- **`stdio`.** Usa `Client(StdioServerParameters(...))` com `sys.executable`, o módulo do servidor e o timeout externo configurado.
+- **`streamable_http`.** Usa `Client(url)` e exige uma URL HTTP(S). Os transportes remotos têm timeout de leitura MCP de duas vezes o timeout por provedor externo para acomodar o fallback.
+
+O cliente usa `list_tools()` e `call_tool()` do SDK. Revalida o resultado
+estruturado ou JSON de um bloco de texto como `ExchangeQuote`. Converte
+`INVALID_CURRENCY:` em `DomainValidationError`. Para indisponibilidade,
+falhas de transporte, ausência da ferramenta e resposta inválida, registra
+apenas a classe da exceção e devolve `ExchangeServiceError`.
+
+A factory `create_exchange_provider(settings)` seleciona o transporte e usa
+`exchange_timeout_seconds` nos três modos.
 
 ### 3. Configuração, Integração no Grafo/API/UI/Docker e Makefile
 - **`src/banco_agil/config.py` e `.env.example`:**
@@ -56,14 +62,14 @@ Isolar a consulta de câmbio em um **servidor MCP stateless e sem PII** constru�
     - `@model_validator(mode="after")`: exigir `mcp_exchange_url` preenchido quando `mcp_exchange_transport == "streamable_http"`.
   - Documentar `MCP_EXCHANGE_TRANSPORT` e `MCP_EXCHANGE_URL` (comentados/opcionais) em `.env.example`.
 - **`src/banco_agil/agents/graph.py`, `src/banco_agil/api/app.py`, `src/banco_agil/ui/app.py`:**
-  - `api/app.py` (no `lifespan`) e `ui/app.py` (no modo direto em memória) passam a usar `create_exchange_provider(settings)` (em vez de instanciar `ExchangeRateClient` diretamente), fazendo com que o Agente de Câmbio consuma o servidor MCP via `langchain-mcp-adapters` em ambos os entrypoints!
+  - `api/app.py` (no `lifespan`) e `ui/app.py` (no modo direto em memória) passam a usar `create_exchange_provider(settings)` (em vez de instanciar `ExchangeRateClient` diretamente), fazendo com que o Agente de Câmbio consuma o servidor MCP via o cliente do SDK em ambos os entrypoints.
   - Preservar `build_graph(..., exchange_provider=...)` aceitando qualquer `ExchangeRateProvider` (compatibilidade total com todos os testes existentes e evals!).
 - **`Makefile`:**
   - Adicionar alvo `mcp-exchange`: `uv run python -m banco_agil.mcp.exchange_server --transport streamable-http --host 127.0.0.1 --port 8001` e incluir `mcp-exchange` em `.PHONY`.
 - **`docker-compose.yml`:**
   - Adicionar serviço `mcp-exchange`:
     - Reutiliza a mesma imagem `banco-agil:local` (`build: .`).
-    - **Sem volume `./data` e sem chaves de LLM/Langfuse** (isolamento físico de PII/credenciais no contêiner!).
+    - **Sem volume `./data` e sem chaves de LLM/Langfuse.** Excluir o diretório de dados do build da imagem compartilhada. O volume da API fornece os CSVs.
     - `command: ["python", "-m", "banco_agil.mcp.exchange_server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8001", "--allowed-host", "mcp-exchange", "--allowed-host", "mcp-exchange:8001"]`.
     - `healthcheck` via socket TCP local em Python (`socket.create_connection(("127.0.0.1", 8001), timeout=3)`).
   - Atualizar serviço `api`:
@@ -74,7 +80,7 @@ Isolar a consulta de câmbio em um **servidor MCP stateless e sem PII** constru�
 Seguindo `docs/adr/000-template.md`, registrar:
 - **Decisão e fronteira de segurança (MCP vs. `ToolRuntime` / `InjectedState`):**
   - Tabela explícita separando:
-    - **Exposto via MCP (stateless, sem PII):** `consultar_cotacao_cambio` (AwesomeAPI + fallback Frankfurter/BCE), rodando sobre `MCPServer` (`mcp` v2, evolução do `FastMCP`) e consumido via `langchain-mcp-adapters` (`MultiServerMCPClient` / `load_mcp_tools`) atrás do contrato `ExchangeRateProvider`.
+    - **Exposto via MCP (stateless, sem PII):** `consultar_cotacao_cambio` (AwesomeAPI + fallback Frankfurter/BCE), rodando sobre `MCPServer` (`mcp` v2, evolução do `FastMCP`) e consumido via `Client` do SDK MCP atrás do contrato `ExchangeRateProvider`.
     - **Mantido local no grafo com `ToolRuntime`:** `autenticar_cliente`, `consultar_limite`, `solicitar_aumento_limite` (HITL `interrupt()`), `calcular_e_atualizar_score`, handoffs e `encerrar_atendimento`, além do gate de autenticação da ferramenta `consultar_cotacao`.
   - Por que ferramentas autenticadas **não** são movidas para MCP no MVP: evitaria injeção confiável de estado (`ToolRuntime`), forçaria propagação de identidade/CPF pelo protocolo MCP, complicaria `interrupt()` HITL distribuído e ampliaria a superfície de exposição de PII.
   - Por que o `mcp-exchange` no `docker-compose.yml` roda sem acesso ao volume `./data` e com `TransportSecuritySettings` (proteção contra DNS rebinding ativa com allowlist explícita).
@@ -100,14 +106,14 @@ Seguindo `docs/adr/000-template.md`, registrar:
        - Fallback automático Frankfurter/BCE → preserva `source="Frankfurter (BCE)"`, `is_reference_rate=True` e `timestamp="2026-11-20"`.
        - Moeda inválida (`BRL` / desconhecida) → retorna erro MCP controlado (`INVALID_CURRENCY:`) sem ecoar PII.
        - Falha total / exceção inesperada → retorna erro MCP controlado (`EXCHANGE_UNAVAILABLE:`) e loga apenas `type(exc).__name__`.
-  2. **Cliente `McpExchangeRateProvider` com `langchain-mcp-adapters` real (modo `inmemory`):**
-     - Usa `mcp.client.Client(server)` + `load_mcp_tools(client.session, handle_tool_errors=False)` reais em memória!
+  2. **Cliente `McpExchangeRateProvider` com o `Client` MCP real (modo `inmemory`):**
+     - Usa `mcp.client.Client(server)` com descoberta e chamada reais em memória.
      - Valida retorno de `ExchangeQuote` (AwesomeAPI e fallback Frankfurter), tradução de `INVALID_CURRENCY:` → `DomainValidationError`, e tradução de `EXCHANGE_UNAVAILABLE:` / falha de sessão / payload corrompido / ferramenta ausente → `ExchangeServiceError`.
   3. **Modos `stdio` e `streamable_http` + `create_exchange_provider(settings)`:**
      - Testa validação de `Settings` (`mcp_exchange_transport` e exigência de `mcp_exchange_url` em `streamable_http`).
-     - Testa que `McpExchangeRateProvider.stdio(...)` e `McpExchangeRateProvider.streamable_http(...)` montam corretamente a configuração do `MultiServerMCPClient` e carregam via `load_mcp_tools` (com `MultiServerMCPClient` substituído por fake/mock no teste — zero sockets e zero subprocessos!).
+     - Testa que `McpExchangeRateProvider.stdio(...)` e `McpExchangeRateProvider.streamable_http(...)` passam os parâmetros ao `Client` do SDK, usando um spy com uma sessão real em memória nos testes.
   4. **Integração ponta a ponta no Agente de Câmbio (`build_graph` + `McpExchangeRateProvider` in-memory):**
-     - Fluxo autenticado completo: `triagem` (autentica) → `cambio` → `consultar_cotacao` → `McpExchangeRateProvider` → `langchain-mcp-adapters` → `MCPServer` → `ExchangeRateClient(MockTransport)` (tanto AwesomeAPI quanto fallback Frankfurter preservando data `2026-11-20` e redigindo CPF/nascimento!).
+     - Fluxo autenticado completo: `triagem` (autentica) → `cambio` → `consultar_cotacao` → `McpExchangeRateProvider` → `Client` → `MCPServer` → `ExchangeRateClient(MockTransport)` (tanto AwesomeAPI quanto fallback Frankfurter preservando data `2026-11-20` e redigindo CPF/nascimento!).
      - Confirma gate de autenticação preservado (chamada sem autenticação bloqueada antes de acionar o MCP).
   5. **CLI `exchange_server.main`:**
      - Testa parsing de argumentos (`stdio` e `streamable-http` com `--host`, `--port`, `--allowed-host`) com `server.run` mockado (verificando `TransportSecuritySettings` com allowlist correta e `stateless_http=True`, `json_response=True`).
