@@ -45,6 +45,7 @@ from banco_agil.infrastructure.exchange_client import (
     FRANKFURTER_URL,
     ExchangeRateClient,
 )
+from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import create_langfuse_observability
 from banco_agil.infrastructure.privacy import CPF_PATTERN, DATE_PATTERN
 
@@ -87,7 +88,7 @@ def load_scenarios(path: Path = DEFAULT_SCENARIOS_PATH) -> list[EvalScenario]:
     return scenarios
 
 
-def _exchange_provider(scenario: EvalScenario, timeout: float) -> ExchangeRateClient:
+def _exchange_provider(scenario: EvalScenario, timeout: float) -> McpExchangeRateProvider:
     def respond(request: httpx.Request) -> httpx.Response:
         url = str(request.url.copy_with(query=None))
         if url == f"{AWESOME_URL}/USD-BRL":
@@ -112,7 +113,9 @@ def _exchange_provider(scenario: EvalScenario, timeout: float) -> ExchangeRateCl
             return httpx.Response(200, json={"date": "2026-11-20", "rates": {"BRL": 5.20}})
         return httpx.Response(404)
 
-    return ExchangeRateClient(timeout, httpx.MockTransport(respond))
+    return McpExchangeRateProvider.in_memory(
+        ExchangeRateClient(timeout, httpx.MockTransport(respond))
+    )
 
 
 def _seed_pii(reply: str, cpfs: set[str], dates: set[str]) -> bool:

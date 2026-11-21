@@ -44,7 +44,7 @@ from banco_agil.agents.tools import (
 )
 from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
-from banco_agil.infrastructure.exchange_client import ExchangeRateClient
+from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import TurnTelemetry, TurnTelemetryCallback
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,9 @@ def build_graph(
     specialist_tools = [voltar_para_triagem, encerrar_atendimento]
     credit_tools = [*build_credit_tools(credit_service), *specialist_tools]
     interview_tools = [*build_interview_tools(credit_service), *specialist_tools]
-    provider = exchange_provider if exchange_provider is not None else ExchangeRateClient()
+    provider = (
+        exchange_provider if exchange_provider is not None else McpExchangeRateProvider.in_memory()
+    )
     exchange_tools = [*build_exchange_tools(provider), *specialist_tools]
     _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools)
     _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools)

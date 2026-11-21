@@ -1,5 +1,6 @@
 import logging
 import socket
+import subprocess
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -33,6 +34,11 @@ def pytest_configure(config):
         patch.setattr(socket.socket, name, no_network)
     patch.setattr(socket, "getaddrinfo", no_network)
     patch.setattr(socket, "create_connection", no_network)
+
+    def no_subprocess(*args, **kwargs):
+        raise AssertionError("Subprocessos proibidos no pytest")
+
+    patch.setattr(subprocess.Popen, "__init__", no_subprocess)
 
 
 @pytest.fixture(autouse=True)

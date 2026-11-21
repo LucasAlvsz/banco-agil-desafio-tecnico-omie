@@ -52,10 +52,10 @@ def test_health_starts_and_releases_runtime(monkeypatch, scripted_model, data_di
     sdk = Mock()
     observer = LangfuseObservability(sdk, BaseCallbackHandler()) if enabled else None
     model_factory = Mock(return_value=scripted_model(responses=[AIMessage(content="Olá!")]))
-    exchange_factory = Mock(wraps=api.ExchangeRateClient)
+    exchange_factory = Mock(wraps=api.create_exchange_provider)
     observer_factory = Mock(return_value=observer)
     monkeypatch.setattr(api, "create_chat_model", model_factory)
-    monkeypatch.setattr(api, "ExchangeRateClient", exchange_factory)
+    monkeypatch.setattr(api, "create_exchange_provider", exchange_factory)
     monkeypatch.setattr(api, "create_langfuse_observability", observer_factory)
 
     app = api.create_app(settings=settings)
@@ -71,7 +71,7 @@ def test_health_starts_and_releases_runtime(monkeypatch, scripted_model, data_di
         assert client.post("/api/v1/chat", json={"message": "Oi"}).json()["reply"] == "Olá!"
         sdk.flush.assert_not_called()
     model_factory.assert_called_once_with(settings)
-    exchange_factory.assert_called_once_with(timeout_seconds=3.5)
+    exchange_factory.assert_called_once_with(settings)
     observer_factory.assert_called_once_with(settings)
     assert sdk.flush.call_count == int(enabled)
     assert not hasattr(app.state, "runtime")
