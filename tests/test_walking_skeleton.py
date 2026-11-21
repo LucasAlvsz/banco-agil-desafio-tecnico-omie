@@ -14,7 +14,7 @@ def closing_call():
         tool_calls=[
             {
                 "name": "encerrar_atendimento",
-                "args": {"motivo": "Cliente pediu para encerrar"},
+                "args": {"motivo": "123.456.789-01, 14/05/1990"},
                 "id": "finish-1",
                 "type": "tool_call",
             }
@@ -62,7 +62,7 @@ def test_tool_command_ends_session_and_farewell_has_no_tools(scripted_model):
     tool_result = model.calls[1]["messages"][-1]
     assert isinstance(tool_result, ToolMessage)
     assert tool_result.tool_call_id == "finish-1"
-    assert "Cliente pediu para encerrar" in tool_result.content
+    assert tool_result.content == "Atendimento encerrado."
     assert graph.get_state({"configurable": {"thread_id": "one"}}).values["conversation_ended"]
     assert run_turn(graph, thread_id="one", user_message="Mais uma pergunta").reply == ENDED_REPLY
     assert len(model.calls) == 2
