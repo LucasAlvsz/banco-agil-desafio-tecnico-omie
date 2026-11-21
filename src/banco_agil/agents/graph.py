@@ -15,16 +15,22 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolInvocationError
-from langgraph.types import Command
+from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel, ConfigDict
 
 from banco_agil.agents.prompts import (
-    build_credit_placeholder_prompt,
+    build_credit_prompt,
     build_exchange_placeholder_prompt,
+    build_interview_placeholder_prompt,
     build_triage_prompt,
 )
 from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
-from banco_agil.agents.tools import build_triage_tools, encerrar_atendimento, voltar_para_triagem
+from banco_agil.agents.tools import (
+    build_credit_tools,
+    build_triage_tools,
+    encerrar_atendimento,
+    voltar_para_triagem,
+)
 from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.rules import normalize_birth_date
 from banco_agil.domain.services import CreditService
@@ -33,17 +39,32 @@ logger = logging.getLogger(__name__)
 
 ENDED_REPLY = "Este atendimento já foi encerrado. Inicie uma nova conversa para continuar."
 ERROR_REPLY = "Não foi possível responder agora. Por favor, tente novamente em instantes."
+PENDING_REPLY = "Confirme ou cancele o pedido de aumento para continuar."
+NO_CONFIRMATION_REPLY = "Não há pedido de aumento aguardando confirmação."
 CPF_IN_REPLY = re.compile(r"(?<!\d)[0-9](?:[.\-\s]*[0-9]){10}(?!\d)")
 DATE_IN_REPLY = re.compile(
     r"(?<!\d)(?:[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|"
     r"[0-9]{1,2}([/.-])[0-9]{1,2}\1[0-9]{4})(?!\d)"
 )
-AGENT_NODES = ("triagem", "credito", "cambio")
-HANDOFF_TOOLS = {"redirecionar_para_credito", "redirecionar_para_cambio", "voltar_para_triagem"}
+AGENT_NODES = ("triagem", "credito", "entrevista", "cambio")
+HANDOFF_TOOLS = {
+    "redirecionar_para_credito",
+    "redirecionar_para_entrevista",
+    "redirecionar_para_cambio",
+    "voltar_para_triagem",
+}
 
 type ConversationGraph = CompiledStateGraph[
     ConversationState, None, ConversationState, ConversationState
 ]
+
+
+class LimitIncreaseConfirmation(BaseModel):
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
+
+    limite_atual: float
+    novo_limite_solicitado: float
+    message: str
 
 
 class TurnResult(BaseModel):
@@ -53,6 +74,7 @@ class TurnResult(BaseModel):
     conversation_ended: bool
     active_agent: AgentName
     authenticated: bool
+    pending_confirmation: LimitIncreaseConfirmation | None = None
 
 
 def _active_agent(state: ConversationState) -> AgentName:
@@ -152,34 +174,72 @@ def build_graph(
     graph = StateGraph(ConversationState)
     triage_tools = [*build_triage_tools(credit_service), encerrar_atendimento]
     specialist_tools = [voltar_para_triagem, encerrar_atendimento]
+    credit_tools = [*build_credit_tools(credit_service), *specialist_tools]
     _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools)
-    _add_agent_nodes(graph, "credito", model, build_credit_placeholder_prompt, specialist_tools)
+    _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools)
+    _add_agent_nodes(
+        graph, "entrevista", model, build_interview_placeholder_prompt, specialist_tools
+    )
     _add_agent_nodes(graph, "cambio", model, build_exchange_placeholder_prompt, specialist_tools)
     graph.add_conditional_edges(START, partial(_route_agent, at_entry=True), [*AGENT_NODES, END])
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
 
 
 def run_turn(graph: ConversationGraph, *, thread_id: str, user_message: str) -> TurnResult:
+    turn_input: ConversationState | None = None
+    if user_message.strip():
+        turn_input = {"messages": [HumanMessage(content=user_message)]}
+    return _execute_turn(graph, thread_id, turn_input)
+
+
+def resume_turn(graph: ConversationGraph, *, thread_id: str, approved: bool) -> TurnResult:
+    return _execute_turn(graph, thread_id, Command(resume={"approved": approved}))
+
+
+def _pending_confirmation(snapshot: StateSnapshot) -> LimitIncreaseConfirmation | None:
+    for item in snapshot.interrupts:
+        value = item.value
+        if isinstance(value, dict) and value.get("action") == "confirm_limit_increase":
+            return LimitIncreaseConfirmation.model_validate(value)
+    return None
+
+
+def _execute_turn(
+    graph: ConversationGraph, thread_id: str, turn_input: ConversationState | Command[Any] | None
+) -> TurnResult:
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     state: ConversationState = {"messages": []}
+    confirmation = None
     try:
-        state = cast(ConversationState, graph.get_state(config).values)
+        snapshot = graph.get_state(config)
+        state = cast(ConversationState, snapshot.values)
+        confirmation = _pending_confirmation(snapshot)
+        resuming = isinstance(turn_input, Command)
         if state.get("conversation_ended"):
             reply = ENDED_REPLY
-        elif not user_message.strip():
+        elif not resuming and snapshot.interrupts:
+            reply = PENDING_REPLY
+        elif resuming and confirmation is None:
+            reply = NO_CONFIRMATION_REPLY
+        elif turn_input is None:
             reply = "Por favor, escreva uma mensagem."
         else:
-            state = cast(
-                ConversationState,
-                graph.invoke({"messages": [HumanMessage(content=user_message)]}, config),
-            )
-            last = state["messages"][-1]
-            reply = last.text.strip() if isinstance(last, AIMessage) else ""
+            graph.invoke(turn_input, config)
+            snapshot = graph.get_state(config)
+            state = cast(ConversationState, snapshot.values)
+            confirmation = _pending_confirmation(snapshot)
+            if confirmation is not None:
+                reply = confirmation.message
+            else:
+                last = state["messages"][-1]
+                reply = last.text.strip() if isinstance(last, AIMessage) else ""
     except Exception as exc:
         logger.error("Falha ao processar turno (%s)", type(exc).__name__)
         # A ferramenta pode ter encerrado a sessão antes de a despedida falhar.
         with suppress(Exception):
-            state = cast(ConversationState, graph.get_state(config).values)
+            snapshot = graph.get_state(config)
+            state = cast(ConversationState, snapshot.values)
+            confirmation = _pending_confirmation(snapshot)
         reply = ERROR_REPLY
 
     return TurnResult(
@@ -187,4 +247,5 @@ def run_turn(graph: ConversationGraph, *, thread_id: str, user_message: str) -> 
         conversation_ended=state.get("conversation_ended", False),
         active_agent=_active_agent(state),
         authenticated=has_authenticated_client(state),
+        pending_confirmation=confirmation if not state.get("conversation_ended") else None,
     )
