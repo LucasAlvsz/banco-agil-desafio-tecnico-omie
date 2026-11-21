@@ -111,7 +111,7 @@ score_final = max(0, min(1000, round(score_bruto)))
 
 - **Orquestração:** `LangGraph` com estado tipado, persistência de sessão via checkpointer (`thread_id`) e topologia de handoffs com 4 nós explícitos, `ToolNode` isolado por agente e roteador condicional determinístico único (ADR 003).
 - **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o estado confiável da sessão (`authenticated`, `client_cpf`) exclusivamente via `ToolRuntime`, nunca de argumentos livres gerados pelo LLM.
-- **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)`.
+- **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)` (ADR 004).
 - **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, Anthropic, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
 - **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) exibida na UI, combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
 - **Exposição e UI:** interface conversacional em **Streamlit** (modo direto em memória e modo cliente HTTP), API REST assíncrona em **FastAPI** e empacotamento com **Docker**.
@@ -135,4 +135,4 @@ Escolhas intencionais para manter o MVP enxuto e seus caminhos naturais de evolu
 
 ## 7. Spikes em Aberto
 
-1. **Mapeamento de Pontos HITL (`F04`):** além da confirmação de aumento de limite, mapear no ADR outros pontos candidatos a intervenção humana (revisão de dados da entrevista, alçada de analista de risco em valores altos).
+Nenhum spike estrutural em aberto — decisões de domínio, LLM, topologia multiagente e pontos HITL registradas em `docs/adr/001` a `docs/adr/004`.
