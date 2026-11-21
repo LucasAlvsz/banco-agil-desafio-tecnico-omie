@@ -97,6 +97,10 @@ deve ser adicionada ao pytest.
   A UI foi exercitada por quatro testes `AppTest`, embora a execução do script pelo
   Streamlit não tenha sido contabilizada no relatório de cobertura de linhas.
 - `make ui`: servidor iniciado e `/_stcore/health` respondeu HTTP 200 (`ok`).
-- Smoke com Groq real **pendente**: não havia `GROQ_API_KEY` configurada nem `.env`
-  neste worktree. O encerramento via provedor real ainda precisa ser confirmado
-  seguindo o procedimento acima; não é inferido a partir dos testes fake.
+- Smoke com Groq real **aprovado** em 2026-11-21, fora do pytest, com
+  `groq/openai/gpt-oss-120b` e credenciais carregadas de um `.env` local externo ao
+  worktree, sem copiar ou registrar segredos. A execução pelo grafo confirmou uma
+  saudação, `encerrar_atendimento` via `ToolNode` (com `ToolMessage` no checkpoint),
+  despedida sem tools e bloqueio de novos turnos na sessão encerrada. Um callback
+  contou três invocações do modelo, com tools vinculadas em `[True, True, False]`;
+  um turno adicional após o encerramento não aumentou essa contagem.
