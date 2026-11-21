@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 from uuid import uuid4
 
@@ -19,6 +20,9 @@ from banco_agil.infrastructure.csv_repositories import (
 )
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.llm_factory import create_chat_model
+from banco_agil.infrastructure.privacy import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def _format_limit(amount: float) -> str:
@@ -34,6 +38,7 @@ def _record_reply(result: TurnResult) -> None:
 
 
 def main() -> None:
+    configure_logging()
     st.set_page_config(page_title="Banco Ágil", page_icon="🏦")
     st.title("Banco Ágil")
 
@@ -59,7 +64,8 @@ def main() -> None:
             st.session_state.graph = build_graph(
                 create_chat_model(settings), credit_service, exchange_provider=exchange_provider
             )
-    except Exception:
+    except Exception as exc:
+        logger.error("Falha na inicialização do atendimento (%s)", type(exc).__name__)
         st.error(
             "Não foi possível iniciar o atendimento. Verifique a configuração do provedor LLM."
         )
