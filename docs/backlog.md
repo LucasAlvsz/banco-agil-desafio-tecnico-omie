@@ -1,7 +1,7 @@
 # Backlog Kanban — Banco Ágil
 
 ## Doing
-- [ ] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR e plano da F00.
+*(vazio)*
 
 ## To Do
 - [ ] **F01 — Domínio e Persistência CSV (TDD, zero LLM):** seeds calibrados, modelos Pydantic, normalizadores, fórmula de score, regra de aprovação em degraus, repositórios CSV + ADR de domínio/persistência.
@@ -18,4 +18,4 @@
 - [ ] **F11 — README Final & Guia de Escala:** consolidar documentação completa do sistema, diagramas de arquitetura, tutorial de execução/testes e caminhos de evolução para escala.
 
 ## Done
-*(vazio)*
+- [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
