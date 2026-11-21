@@ -4,7 +4,6 @@
 *(vazio)*
 
 ## To Do
-- [ ] **F09 — FastAPI & Docker:** API REST assíncrona (`/api/v1/chat`, `/health`), Streamlit em modo híbrido (direto ou via HTTP) e `Dockerfile`/`docker-compose.yml`.
 - [ ] **F10 — MCP (Câmbio):** servidor `FastMCP` de câmbio consumido pelo Agente de Câmbio via `langchain-mcp-adapters` + ADR de fronteira de segurança MCP vs. `InjectedState`.
 - [ ] **F11 — README Final & Guia de Escala:** consolidar documentação completa do sistema, diagramas de arquitetura, tutorial de execução/testes e caminhos de evolução para escala.
 
@@ -19,3 +18,4 @@
 - [x] **F06 — Agente de Câmbio:** `ExchangeQuote`, `ExchangeRateProvider`, `normalize_currency_code`, `ExchangeRateClient` (`httpx.AsyncClient`, AwesomeAPI + fallback Frankfurter/BCE), `consultar_cotacao` com ponte sync→async, 274 testes (99% cobertura) e ADR 005.
 - [x] **F07 — Guardrails, Robustez e LGPD:** `privacy.py` (`mask_pii`, `mask_pii_data`, `PiiMaskingFilter`, `configure_logging`), `guardrails.py` (limites de entrada, bloqueio determinístico de *prompt injection*, `sanitize_reply`), `DEFAULT_RECURSION_LIMIT=16` com recuperação limpa de `GraphRecursionError`, escopo estrito nos prompts, 348 testes (99% cobertura) e ADR 006.
 - [x] **F08 — Evals & Observabilidade:** telemetria local por turno (`TurnTelemetry`, `TurnTelemetryCallback`, `litellm.cost_per_token`), painel na sidebar da UI, Langfuse v4 opcional com `mask` + `mask_otel_spans`, suíte declarativa `evals/scenarios.json` (`make evals`, 12/12 cenários, 0 vazamentos de PII), 366 testes (99% cobertura) e ADR 007.
+- [x] **F09 — FastAPI & Docker:** API REST assíncrona (`/health`, `/api/v1/chat`, `lifespan`, `asyncio.to_thread`, lock por `thread_id`, `CreditService._write_lock`, `StrictBool` HITL, handlers 422/500 sem PII), Streamlit híbrido (`API_BASE_URL` / `HttpChatClient`), `Dockerfile` multi-stage (`uv:0.10`, não-root) + `docker-compose.yml`, 406 testes (99% cobertura) e ADR 008.

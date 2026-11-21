@@ -13,15 +13,18 @@ banco-agil/
 │   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
 │   ├── infrastructure/ # Repositórios CSV, câmbio HTTP, factory LiteLLM, privacidade LGPD e observabilidade
 │   ├── agents/         # Estado tipado, guardrails, ferramentas LangGraph e grafo conversacional
+│   ├── api/            # API REST assíncrona FastAPI (/health, /api/v1/chat)
 │   ├── evals/          # Runner determinístico offline/live e modelos de avaliação
-│   └── ui/             # Interface conversacional Streamlit
+│   └── ui/             # Interface conversacional Streamlit (modo direto e cliente HTTP)
 ├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede)
 ├── docs/
 │   ├── spec.md         # Especificação do produto (fonte única da verdade)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
-│   ├── adr/            # Architecture Decision Records (000-template.md, 001..007)
+│   ├── adr/            # Architecture Decision Records (000-template.md, 001..008)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
-├── Makefile            # Comandos padronizados de setup, UI, evals e verificação
+├── Dockerfile          # Imagem multi-stage (uv + Python 3.12 slim, usuário não-root)
+├── docker-compose.yml  # Orquestração local dos serviços api e ui
+├── Makefile            # Comandos padronizados de setup, API, UI, evals e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest
 ```
 
@@ -32,6 +35,7 @@ banco-agil/
 - `make test` — executa `pytest` com relatório de cobertura em `src/banco_agil`.
 - `make check` — **gate obrigatório** antes de qualquer merge (`ruff check`, `ruff format --check`, `mypy src`, `pytest`).
 - `make evals` — executa a suíte determinística de avaliação ponta a ponta (`evals/scenarios.json`).
+- `make api` — sobe a API REST FastAPI em `http://localhost:8000` (`src/banco_agil/api/app.py`).
 - `make ui` — sobe a interface conversacional Streamlit (`src/banco_agil/ui/app.py`).
 
 ## Princípios e Convenções
