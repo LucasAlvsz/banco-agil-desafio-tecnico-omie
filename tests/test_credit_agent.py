@@ -303,7 +303,7 @@ def test_rejection_preserves_the_amount_and_hands_off_to_interview(credit_sessio
         increase(6000),
         AIMessage(content=offer),
         tool_step(call("redirecionar_para_entrevista")),
-        AIMessage(content="A entrevista de crédito ainda está indisponível."),
+        AIMessage(content="Qual é sua renda mensal?"),
     )
     original = csv_bytes(credit_files)
     assert turn(graph).pending_confirmation is not None
@@ -325,8 +325,10 @@ def test_rejection_preserves_the_amount_and_hands_off_to_interview(credit_sessio
 
     result = turn(graph, "Sim, quero fazer a entrevista.")
     assert result.active_agent == "entrevista" and result.authenticated
-    assert "entrevista de crédito ainda está indisponível" in model.calls[3]["messages"][0].text
+    assert result.reply == "Qual é sua renda mensal?"
+    assert "Conduza a entrevista de crédito" in model.calls[3]["messages"][0].text
     assert {tool["function"]["name"] for tool in model.calls[3]["tools"]} == {
+        "calcular_e_atualizar_score",
         "voltar_para_triagem",
         "encerrar_atendimento",
     }
