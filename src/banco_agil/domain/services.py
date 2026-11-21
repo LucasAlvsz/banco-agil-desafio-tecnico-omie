@@ -1,3 +1,5 @@
+from threading import Lock
+
 from banco_agil.domain.errors import ClientNotFoundError
 from banco_agil.domain.models import Client, LimitEvaluationResult
 from banco_agil.domain.repositories import (
@@ -23,6 +25,7 @@ class CreditService:
         self.clients = clients
         self.tiers = tiers
         self.requests = requests
+        self._write_lock = Lock()
 
     def authenticate(self, cpf: str, birth_date: str) -> Client | None:
         cpf = normalize_cpf(cpf)
@@ -37,12 +40,13 @@ class CreditService:
         return self.clients.get(normalize_cpf(cpf))
 
     def process_limit_increase(self, cpf: str, requested_limit: float) -> LimitEvaluationResult:
-        client = self.get_client(cpf)
-        result = evaluate_limit_increase(client, requested_limit, self.tiers.list_all())
-        self.requests.append(result.pedido)
-        if result.aprovado:
-            self.clients.update(client.model_copy(update={"limite_atual": requested_limit}))
-        return result
+        with self._write_lock:
+            client = self.get_client(cpf)
+            result = evaluate_limit_increase(client, requested_limit, self.tiers.list_all())
+            self.requests.append(result.pedido)
+            if result.aprovado:
+                self.clients.update(client.model_copy(update={"limite_atual": requested_limit}))
+            return result
 
     def recalculate_score(
         self,
@@ -54,14 +58,15 @@ class CreditService:
         num_dependentes: object,
         tem_dividas: object,
     ) -> Client:
-        client = self.get_client(cpf)
-        score = calculate_credit_score(
-            renda_mensal=renda_mensal,
-            despesas_fixas=despesas_fixas,
-            tipo_emprego=tipo_emprego,
-            num_dependentes=num_dependentes,
-            tem_dividas=tem_dividas,
-        )
-        updated = client.model_copy(update={"score": score})
-        self.clients.update(updated)
-        return updated
+        with self._write_lock:
+            client = self.get_client(cpf)
+            score = calculate_credit_score(
+                renda_mensal=renda_mensal,
+                despesas_fixas=despesas_fixas,
+                tipo_emprego=tipo_emprego,
+                num_dependentes=num_dependentes,
+                tem_dividas=tem_dividas,
+            )
+            updated = client.model_copy(update={"score": score})
+            self.clients.update(updated)
+            return updated
