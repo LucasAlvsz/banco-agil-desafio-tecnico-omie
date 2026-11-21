@@ -147,3 +147,20 @@ def test_model_validation_hides_pii(client):
     assert "private-cpf" not in str(error.value)
     with pytest.raises(ValidationError):
         client.score = 500
+
+
+def test_naive_evaluation_timestamp(client, tiers):
+    with pytest.raises(DomainValidationError):
+        evaluate_limit_increase(client, 6000, tiers, datetime(2026, 1, 1))
+
+
+def test_request_requires_timezone():
+    from banco_agil.domain.models import LimitIncreaseRequest
+
+    with pytest.raises(ValidationError):
+        LimitIncreaseRequest(
+            cpf_cliente="12345678901",
+            data_hora_solicitacao="2026-01-01T00:00:00",
+            limite_atual=2500,
+            novo_limite_solicitado=6000,
+        )

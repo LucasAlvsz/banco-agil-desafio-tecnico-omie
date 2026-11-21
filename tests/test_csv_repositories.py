@@ -107,3 +107,24 @@ def test_append(tmp_path, empty):
         repo.append(request)
     with patch.object(Path, "open", side_effect=OSError), pytest.raises(PersistenceError):
         repo.append(request)
+
+
+def test_duplicate_clients(clients):
+    with clients.path.open("a") as stream:
+        stream.write("12345678901,Ana,1990-05-14,2500.00,420\n")
+    with pytest.raises(PersistenceError):
+        clients.get("12345678901")
+
+
+def test_append_write_failure(tmp_path):
+    from banco_agil.domain.models import LimitIncreaseRequest
+
+    request = LimitIncreaseRequest(
+        cpf_cliente="12345678901",
+        data_hora_solicitacao="2026-01-01T00:00:00+00:00",
+        limite_atual=2500,
+        novo_limite_solicitado=6000,
+    )
+    repo = CsvLimitRequestRepository(tmp_path / "missing" / "requests.csv")
+    with pytest.raises(PersistenceError):
+        repo.append(request)
