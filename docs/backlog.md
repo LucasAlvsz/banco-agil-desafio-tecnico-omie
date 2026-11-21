@@ -4,7 +4,6 @@
 *(vazio)*
 
 ## To Do
-- [ ] **F07 — Guardrails, Robustez e LGPD:** tratamento controlado de erros, bloqueio de fora de escopo, filtro de mascaramento de PII em logs.
 - [ ] **F08 — Evals & Observabilidade:** dataset de cenários de avaliação (`make evals`), telemetria local (latência/tokens/custo/rota) e integração opcional com Langfuse.
 - [ ] **F09 — FastAPI & Docker:** API REST assíncrona (`/api/v1/chat`, `/health`), Streamlit em modo híbrido (direto ou via HTTP) e `Dockerfile`/`docker-compose.yml`.
 - [ ] **F10 — MCP (Câmbio):** servidor `FastMCP` de câmbio consumido pelo Agente de Câmbio via `langchain-mcp-adapters` + ADR de fronteira de segurança MCP vs. `InjectedState`.
@@ -19,3 +18,4 @@
 - [x] **F04 — Agente de Crédito & HITL:** consulta de limite, `solicitar_aumento_limite` com `interrupt()`/`Command(resume=...)` idempotente, UI Streamlit com botões de confirmação/cancelamento, handoff para `entrevista`, 188 testes (99% cobertura) e ADR 004.
 - [x] **F05 — Agente de Entrevista de Crédito:** coleta dos 5 indicadores, `calcular_e_atualizar_score` (`ToolRuntime`, tipos estritos), atualização em `clientes.csv`, handoff invisível de volta ao Crédito e jornada completa ponta a ponta testada (209 testes, 99% cobertura).
 - [x] **F06 — Agente de Câmbio:** `ExchangeQuote`, `ExchangeRateProvider`, `normalize_currency_code`, `ExchangeRateClient` (`httpx.AsyncClient`, AwesomeAPI + fallback Frankfurter/BCE), `consultar_cotacao` com ponte sync→async, 274 testes (99% cobertura) e ADR 005.
+- [x] **F07 — Guardrails, Robustez e LGPD:** `privacy.py` (`mask_pii`, `mask_pii_data`, `PiiMaskingFilter`, `configure_logging`), `guardrails.py` (limites de entrada, bloqueio determinístico de *prompt injection*, `sanitize_reply`), `DEFAULT_RECURSION_LIMIT=16` com recuperação limpa de `GraphRecursionError`, escopo estrito nos prompts, 348 testes (99% cobertura) e ADR 006.
