@@ -54,9 +54,10 @@ def test_tool_command_ends_session_and_farewell_has_no_tools(credit_service, scr
     )
     graph = build_graph(model, credit_service)
     result = run_turn(graph, thread_id="one", user_message="Quero encerrar")
-    assert result == TurnResult(
-        active_agent="triagem", authenticated=False, reply="Até logo!", conversation_ended=True
-    )
+    assert result.reply == "Até logo!"
+    assert result.conversation_ended and not result.authenticated
+    assert result.active_agent == "triagem"
+    assert result.telemetry.tools_called == ("encerrar_atendimento",)
     assert model.bindings == 1
     assert model.calls[0]["tools"][-1]["function"]["name"] == "encerrar_atendimento"
     assert model.calls[1]["tools"] is None
@@ -92,9 +93,10 @@ def test_provider_failure_is_safe_and_retry_preserves_history(
     )
     graph = build_graph(model, credit_service)
     result = run_turn(graph, thread_id="one", user_message="Olá")
-    assert result == TurnResult(
-        active_agent="triagem", authenticated=False, reply=ERROR_REPLY, conversation_ended=False
-    )
+    assert result.reply == ERROR_REPLY
+    assert not result.conversation_ended and not result.authenticated
+    assert result.active_agent == "triagem"
+    assert result.telemetry.total_tokens == 0
     assert "private-key-and-PII" not in result.reply
     assert caplog.record_tuples == [
         ("banco_agil.agents.graph", logging.ERROR, "Falha ao processar turno (RuntimeError)")
@@ -109,9 +111,11 @@ def test_provider_failure_is_safe_and_retry_preserves_history(
 def test_failure_after_tool_keeps_session_closed(credit_service, scripted_model):
     model = scripted_model(responses=[closing_call(), RuntimeError("private-provider-error")])
     graph = build_graph(model, credit_service)
-    assert run_turn(graph, thread_id="one", user_message="Encerrar") == TurnResult(
-        active_agent="triagem", authenticated=False, reply=ERROR_REPLY, conversation_ended=True
-    )
+    result = run_turn(graph, thread_id="one", user_message="Encerrar")
+    assert result.reply == ERROR_REPLY
+    assert result.conversation_ended and not result.authenticated
+    assert result.active_agent == "triagem"
+    assert result.telemetry.tools_called == ("encerrar_atendimento",)
     assert run_turn(graph, thread_id="one", user_message="Oi").reply == ENDED_REPLY
     assert len(model.calls) == 2
 
@@ -138,5 +142,6 @@ def test_turn_result_is_immutable():
     result = TurnResult(
         active_agent="triagem", authenticated=False, reply="Olá!", conversation_ended=False
     )
+    assert result.telemetry.latency_ms == 0
     with pytest.raises(ValidationError, match="frozen"):
         result.conversation_ended = True

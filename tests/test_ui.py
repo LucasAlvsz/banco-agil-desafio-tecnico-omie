@@ -1,11 +1,15 @@
+from unittest.mock import Mock
+
 import httpx
 import pytest
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from streamlit.testing.v1 import AppTest
 
 from banco_agil.agents.graph import ERROR_REPLY
 from banco_agil.agents.guardrails import GUARDRAIL_BLOCKED_REPLY
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
+from banco_agil.infrastructure.observability import LangfuseObservability
 
 APP = "from banco_agil.ui.app import main\nmain()"
 
@@ -41,7 +45,10 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
                     }
                 ],
             ),
-            AIMessage(content="Ana Souza, como posso ajudar com seu crédito?"),
+            AIMessage(
+                content="Ana Souza, como posso ajudar com seu crédito?",
+                usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+            ),
             AIMessage(
                 content="",
                 tool_calls=[
@@ -72,6 +79,15 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
     state = app.session_state.graph.get_state({"configurable": {"thread_id": first_thread}}).values
     assert state["authenticated"]
     assert state["active_agent"] == "credito"
+    sidebar = "\n".join(item.value for item in app.sidebar.text)
+    assert app.sidebar.subheader[0].value == "Telemetria do turno"
+    assert app.sidebar.caption[0].value == "Local (Langfuse desativado)"
+    assert "Agente ativo: credito" in sidebar
+    assert "Rota: triagem → credito" in sidebar
+    assert "Latência:" in sidebar and " ms" in sidebar
+    assert "Tokens: 10 entrada, 3 saída, 13 total" in sidebar
+    assert "Custo estimado: US$" in sidebar
+    assert all(value not in sidebar for value in ("Ana Souza", "12345678901", "1990-05-14"))
     app.chat_input[0].set_value("Pode encerrar").run()
     assert not app.exception
     assert app.session_state.conversation_ended
@@ -83,6 +99,9 @@ def test_ui_chat_closure_and_new_conversation(monkeypatch, scripted_model):
     assert not app.exception
     assert app.session_state.thread_id != first_thread
     assert app.session_state.history == []
+    assert app.session_state.last_telemetry is None
+    assert app.session_state.active_agent == "triagem"
+    assert [item.value for item in app.sidebar.text] == ["Agente ativo: triagem"]
     assert not app.chat_input[0].disabled
     app.chat_input[0].set_value("Recomeçar").run()
     assert app.chat_message[-1].markdown[0].value == "Nova conversa!"
@@ -261,3 +280,25 @@ def test_ui_limit_confirmation(
         assert requests.read_bytes().splitlines()[-1].endswith(b",rejeitado")
     else:
         assert requests.read_bytes() == original
+
+
+def test_ui_displays_langfuse_status_and_unavailable_cost(monkeypatch, scripted_model):
+    model = scripted_model(
+        responses=[
+            AIMessage(
+                content="Olá!",
+                usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+                response_metadata={"model_name": "unknown-ui-model"},
+            ),
+        ]
+    )
+    observability = LangfuseObservability(Mock(), BaseCallbackHandler())
+    monkeypatch.setattr("banco_agil.ui.app.create_langfuse_observability", lambda _: observability)
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_model", lambda _: model)
+
+    app = AppTest.from_string(APP).run()
+    app.chat_input[0].set_value("Oi").run()
+
+    assert not app.exception
+    assert app.sidebar.caption[0].value == "Langfuse ativo"
+    assert "Custo estimado: N/D" in [item.value for item in app.sidebar.text]

@@ -1,9 +1,11 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from functools import partial
+from time import perf_counter
 from typing import Any, Literal, cast
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -22,7 +24,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.prebuilt.tool_node import ToolCallRequest, ToolInvocationError
 from langgraph.types import Command, StateSnapshot
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from banco_agil.agents.guardrails import RECURSION_LIMIT_REPLY, evaluate_user_input, sanitize_reply
 from banco_agil.agents.prompts import (
@@ -43,6 +45,7 @@ from banco_agil.agents.tools import (
 from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
+from banco_agil.infrastructure.observability import TurnTelemetry, TurnTelemetryCallback
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ class TurnResult(BaseModel):
     active_agent: AgentName
     authenticated: bool
     pending_confirmation: LimitIncreaseConfirmation | None = None
+    telemetry: TurnTelemetry = Field(default_factory=lambda: TurnTelemetry(latency_ms=0.0))
 
 
 def _active_agent(state: ConversationState) -> AgentName:
@@ -182,8 +186,10 @@ def run_turn(
     thread_id: str,
     user_message: str,
     recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    callbacks: Sequence[BaseCallbackHandler] = (),
+    model_name: str | None = None,
 ) -> TurnResult:
-    return _execute_turn(graph, thread_id, user_message, recursion_limit)
+    return _execute_turn(graph, thread_id, user_message, recursion_limit, callbacks, model_name)
 
 
 def resume_turn(
@@ -192,8 +198,17 @@ def resume_turn(
     thread_id: str,
     approved: bool,
     recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    callbacks: Sequence[BaseCallbackHandler] = (),
+    model_name: str | None = None,
 ) -> TurnResult:
-    return _execute_turn(graph, thread_id, Command(resume={"approved": approved}), recursion_limit)
+    return _execute_turn(
+        graph,
+        thread_id,
+        Command(resume={"approved": approved}),
+        recursion_limit,
+        callbacks,
+        model_name,
+    )
 
 
 def _pending_confirmation(snapshot: StateSnapshot) -> LimitIncreaseConfirmation | None:
@@ -209,7 +224,12 @@ def _execute_turn(
     thread_id: str,
     turn_input: str | Command[Any],
     recursion_limit: int,
+    callbacks: Sequence[BaseCallbackHandler],
+    model_name: str | None,
 ) -> TurnResult:
+    started = perf_counter()
+    telemetry = TurnTelemetryCallback(default_model_name=model_name)
+    guardrail_blocked = False
     if recursion_limit < 2:
         raise ValueError("recursion_limit deve ser maior ou igual a 2")
     config: RunnableConfig = {
@@ -236,6 +256,7 @@ def _execute_turn(
         ):
             if decision.reason != "empty":
                 logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
+            guardrail_blocked = True
             reply = decision.reply
         else:
             invocation: ConversationState | Command[Any] = (
@@ -243,7 +264,14 @@ def _execute_turn(
                 if isinstance(turn_input, str)
                 else turn_input
             )
-            graph.invoke(invocation, config)
+            graph.invoke(
+                invocation,
+                config
+                | {
+                    "callbacks": [telemetry, *callbacks],
+                    "metadata": {"langfuse_session_id": thread_id, "langfuse_tags": ["banco-agil"]},
+                },
+            )
             snapshot = graph.get_state(config)
             state = cast(ConversationState, snapshot.values)
             confirmation = _pending_confirmation(snapshot)
@@ -277,10 +305,17 @@ def _execute_turn(
                     config, {"messages": [RemoveMessage(id=last.id)]}, as_node=_active_agent(state)
                 )
 
+    reply = sanitize_reply(reply, state) if reply else ERROR_REPLY
+    active_agent = _active_agent(state)
+    if not telemetry.agent_route:
+        telemetry.agent_route.append(active_agent)
     return TurnResult(
-        reply=sanitize_reply(reply, state) if reply else ERROR_REPLY,
+        reply=reply,
         conversation_ended=state.get("conversation_ended", False),
-        active_agent=_active_agent(state),
+        active_agent=active_agent,
         authenticated=has_authenticated_client(state),
         pending_confirmation=confirmation if not state.get("conversation_ended") else None,
+        telemetry=telemetry.build(
+            (perf_counter() - started) * 1000, guardrail_blocked=guardrail_blocked
+        ),
     )
