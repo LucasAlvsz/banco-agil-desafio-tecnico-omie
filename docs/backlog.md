@@ -1,10 +1,9 @@
 # Backlog Kanban — Banco Ágil
 
 ## Doing
-- [ ] **Spike — Topologia Multiagente LangGraph:** investigar padrões oficiais do LangGraph v1 (Híbrido vs. Supervisor vs. Swarm) e registrar ADR de topologia.
+- [ ] **F03 — Agente de Triagem & Gate de Autenticação:** topologia de handoffs (ADR 003), autenticação contra `clientes.csv`, limite determinístico de 3 falhas consecutivas, roteamento pós-auth e `ToolRuntime`.
 
 ## To Do
-- [ ] **F03 — Agente de Triagem & Gate de Autenticação:** autenticação contra `clientes.csv`, limite determinístico de 3 falhas consecutivas, roteamento pós-auth e `InjectedState`.
 - [ ] **F04 — Agente de Crédito & HITL:** consulta de limite, validação de aumento, `interrupt()` de confirmação antes de gravar CSV + ADR de pontos HITL.
 - [ ] **F05 — Agente de Entrevista de Crédito:** coleta das 5 variáveis, recálculo determinístico, atualização em `clientes.csv` e retorno contextual ao Crédito.
 - [ ] **F06 — Agente de Câmbio:** cliente HTTP assíncrono (`AwesomeAPI` + fallback `Frankfurter`), encerramento de tópico + ADR de integração de câmbio.
@@ -18,3 +17,4 @@
 - [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
 - [x] **F01 — Domínio e Persistência CSV:** seeds calibrados, modelos Pydantic v2 imutáveis, normalizadores, fórmula de score, degraus de limite, `Protocol`s, `CreditService`, repositórios CSV atômicos, 95 testes (100% cobertura) e ADR 001.
 - [x] **F02 — Walking Skeleton:** `Settings` tipado (`SecretStr`), `llm_factory` (LiteLLM/Groq), grafo mínimo LangGraph (`ToolNode` + `Command` + `InMemorySaver`), chat Streamlit (`make ui`), 137 testes, smoke real na Groq e ADR 002.
+- [x] **Spike — Topologia Multiagente LangGraph:** análise dos padrões oficiais do LangGraph v1 e decisão registrada no ADR 003 (4 nós explícitos + `ToolNode` isolado por agente + roteador determinístico + `ToolRuntime`).

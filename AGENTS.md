@@ -17,7 +17,7 @@ banco-agil/
 ├── docs/
 │   ├── spec.md         # Especificação do produto (fonte única da verdade)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
-│   ├── adr/            # Architecture Decision Records (000-template.md, 001-..., 002-...)
+│   ├── adr/            # Architecture Decision Records (000-template.md, 001..003)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
 ├── Makefile            # Comandos padronizados de setup, UI e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest

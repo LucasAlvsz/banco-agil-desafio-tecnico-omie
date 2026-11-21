@@ -109,8 +109,8 @@ score_final = max(0, min(1000, round(score_bruto)))
 
 ## 5. Arquitetura do MVP
 
-- **Orquestração:** `LangGraph` com estado tipado e persistência de sessão via checkpointer (`thread_id`). *Topologia multiagente pendente de spike antes da `F03`.*
-- **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o CPF exclusivamente do estado confiável da sessão (`InjectedState`), nunca de argumentos livres gerados pelo LLM.
+- **Orquestração:** `LangGraph` com estado tipado, persistência de sessão via checkpointer (`thread_id`) e topologia de handoffs com 4 nós explícitos, `ToolNode` isolado por agente e roteador condicional determinístico único (ADR 003).
+- **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o estado confiável da sessão (`authenticated`, `client_cpf`) exclusivamente via `ToolRuntime`, nunca de argumentos livres gerados pelo LLM.
 - **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)`.
 - **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, Anthropic, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
 - **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) exibida na UI, combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
@@ -135,6 +135,4 @@ Escolhas intencionais para manter o MVP enxuto e seus caminhos naturais de evolu
 
 ## 7. Spikes em Aberto
 
-1. **Topologia Multiagente (`LangGraph` v1):** comparar padrões oficiais (roteador determinístico + handoffs vs. supervisor vs. swarm) antes de fechar o ADR na `F03`.
-2. **Mapeamento de Pontos HITL:** além da confirmação de aumento de limite, mapear no ADR outros pontos candidatos a intervenção humana (revisão de dados da entrevista, alçada de analista de risco em valores altos).
-3. **Validação de Tool Calling (Groq + LiteLLM):** validar `bind_tools()` com o modelo configurado logo no walking skeleton (`F02`).
+1. **Mapeamento de Pontos HITL (`F04`):** além da confirmação de aumento de limite, mapear no ADR outros pontos candidatos a intervenção humana (revisão de dados da entrevista, alçada de analista de risco em valores altos).
