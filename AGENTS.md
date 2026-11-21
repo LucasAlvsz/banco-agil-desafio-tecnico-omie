@@ -6,12 +6,15 @@ Guia operacional, convenções e fluxo de trabalho deste repositório. Este arqu
 
 ```text
 banco-agil/
+├── data/               # Seeds CSV (clientes, score_limite, solicitacoes_aumento_limite)
 ├── src/banco_agil/     # Código da aplicação (Python 3.12, mypy --strict)
+│   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
+│   └── infrastructure/ # Repositórios CSV (escrita atômica e append-only)
 ├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede)
 ├── docs/
 │   ├── spec.md         # Especificação do produto (fonte única da verdade)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
-│   ├── adr/            # Architecture Decision Records (000-template.md)
+│   ├── adr/            # Architecture Decision Records (000-template.md, 001-...)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
 ├── Makefile            # Comandos padronizados de setup e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest

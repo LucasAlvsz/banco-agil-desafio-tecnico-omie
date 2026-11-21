@@ -1,11 +1,9 @@
 # Backlog Kanban — Banco Ágil
 
 ## Doing
-*(vazio)*
+- [ ] **F02 — Walking Skeleton:** Streamlit + grafo LangGraph mínimo (1 nó) + `llm_factory` (LiteLLM/Groq) + tool de encerramento + validação de tool calling na Groq.
 
 ## To Do
-- [ ] **F01 — Domínio e Persistência CSV (TDD, zero LLM):** seeds calibrados, modelos Pydantic, normalizadores, fórmula de score, regra de aprovação em degraus, repositórios CSV + ADR de domínio/persistência.
-- [ ] **F02 — Walking Skeleton:** Streamlit + grafo LangGraph mínimo (1 nó) + `llm_factory` (LiteLLM/Groq) + tool de encerramento + validação de tool calling na Groq.
 - [ ] **Spike — Topologia Multiagente LangGraph:** investigar padrões oficiais do LangGraph v1 (Híbrido vs. Supervisor vs. Swarm) e registrar ADR de topologia.
 - [ ] **F03 — Agente de Triagem & Gate de Autenticação:** autenticação contra `clientes.csv`, limite determinístico de 3 falhas consecutivas, roteamento pós-auth e `InjectedState`.
 - [ ] **F04 — Agente de Crédito & HITL:** consulta de limite, validação de aumento, `interrupt()` de confirmação antes de gravar CSV + ADR de pontos HITL.
@@ -19,3 +17,4 @@
 
 ## Done
 - [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
+- [x] **F01 — Domínio e Persistência CSV:** seeds calibrados, modelos Pydantic v2 imutáveis, normalizadores, fórmula de score, degraus de limite, `Protocol`s, `CreditService`, repositórios CSV atômicos, 95 testes (100% cobertura) e ADR 001.
