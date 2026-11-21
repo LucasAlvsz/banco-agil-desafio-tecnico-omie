@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from math import isfinite
 from typing import Any, Literal, cast
 
@@ -16,6 +18,8 @@ from banco_agil.domain.errors import (
     DomainValidationError,
     PersistenceError,
 )
+from banco_agil.domain.models import ExchangeQuote
+from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
 
 logger = logging.getLogger(__name__)
@@ -202,6 +206,49 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
         )
 
     return [calcular_e_atualizar_score]
+
+
+def _get_exchange_quote(provider: ExchangeRateProvider, currency: str) -> ExchangeQuote:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(provider.get_quote(currency))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, provider.get_quote(currency)).result()
+
+
+def build_exchange_tools(exchange_provider: ExchangeRateProvider) -> list[BaseTool]:
+    @tool
+    def consultar_cotacao(
+        moeda: str = "USD", *, runtime: ToolRuntime[None, ConversationState]
+    ) -> Command[Any]:
+        """Consulta em reais a cotação da moeda informada. O padrão é USD."""
+        if not has_authenticated_client(runtime.state):
+            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+        try:
+            quote = _get_exchange_quote(exchange_provider, moeda)
+        except DomainValidationError as exc:
+            return _tool_result(runtime, str(exc), active_agent="cambio")
+        except Exception as exc:
+            logger.error("%s", type(exc).__name__)
+            return _tool_result(runtime, "A consulta de câmbio está temporariamente indisponível.")
+
+        currency = quote.currency_code
+        if quote.currency_name != currency:
+            currency = f"{quote.currency_name} ({currency})"
+        bid = str(quote.bid).replace(".", ",")
+        if quote.is_reference_rate:
+            details = f"Taxa de referência diária: R$ {bid}. Data de referência: {quote.timestamp}."
+        else:
+            details = f"Compra: R$ {bid}."
+            if quote.ask is not None:
+                ask = str(quote.ask).replace(".", ",")
+                details += f" Venda: R$ {ask}."
+            details += f" Data e hora da cotação: {quote.timestamp}."
+        return _tool_result(runtime, f"{currency} em BRL. {details} Fonte: {quote.source}.")
+
+    return [consultar_cotacao]
 
 
 def _redirect(

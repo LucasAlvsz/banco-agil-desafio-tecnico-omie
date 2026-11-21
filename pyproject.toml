@@ -9,6 +9,7 @@ description = "Sistema multiagente de atendimento bancário digital (Banco Ágil
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "httpx>=0.28.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "langchain-core>=0.3.0",
@@ -23,6 +24,7 @@ dev = [
     "mypy>=1.14.0",
     "pre-commit>=4.1.0",
     "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.9.0",
 ]
@@ -50,3 +52,5 @@ packages = ["banco_agil"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

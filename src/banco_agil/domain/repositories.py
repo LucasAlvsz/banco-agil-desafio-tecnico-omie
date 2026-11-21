@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from banco_agil.domain.models import Client, LimitIncreaseRequest, ScoreLimitTier
+from banco_agil.domain.models import Client, ExchangeQuote, LimitIncreaseRequest, ScoreLimitTier
 
 
 class ClientRepository(Protocol):
@@ -14,3 +14,7 @@ class ScoreLimitRepository(Protocol):
 
 class LimitRequestRepository(Protocol):
     def append(self, request: LimitIncreaseRequest) -> None: ...
+
+
+class ExchangeRateProvider(Protocol):
+    async def get_quote(self, currency: str = "USD") -> ExchangeQuote: ...

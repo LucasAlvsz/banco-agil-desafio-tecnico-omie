@@ -60,3 +60,14 @@ class LimitEvaluationResult(DomainModel):
     @property
     def aprovado(self) -> bool:
         return self.pedido.status_pedido == LimitIncreaseStatus.APROVADO
+
+
+class ExchangeQuote(DomainModel):
+    currency_code: str = Field(pattern=r"^[A-Z]{3}$")
+    currency_name: str = Field(min_length=1)
+    target_currency: str = "BRL"
+    bid: float = Field(gt=0)
+    ask: float | None = Field(default=None, gt=0)
+    timestamp: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    is_reference_rate: bool = False

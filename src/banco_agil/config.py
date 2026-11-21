@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     llm_model: str = "groq/openai/gpt-oss-120b"
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=45.0, gt=0.0)
+    exchange_timeout_seconds: float = Field(default=8.0, gt=0.0)
     data_dir: Path = Path("data")
     groq_api_key: SecretStr | None = None
     gemini_api_key: SecretStr | None = None

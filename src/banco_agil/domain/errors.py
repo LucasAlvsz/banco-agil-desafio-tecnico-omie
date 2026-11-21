@@ -12,3 +12,7 @@ class ClientNotFoundError(DomainError):
 
 class PersistenceError(DomainError):
     pass
+
+
+class ExchangeServiceError(DomainError):
+    pass
