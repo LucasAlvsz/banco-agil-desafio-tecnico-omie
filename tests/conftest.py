@@ -8,6 +8,12 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
 from banco_agil.config import Settings
+from banco_agil.domain.services import CreditService
+from banco_agil.infrastructure.csv_repositories import (
+    CsvClientRepository,
+    CsvLimitRequestRepository,
+    CsvScoreLimitRepository,
+)
 
 
 def pytest_configure(config):
@@ -59,3 +65,26 @@ class ScriptedChatModel(BaseChatModel):
 @pytest.fixture
 def scripted_model():
     return ScriptedChatModel
+
+
+@pytest.fixture
+def data_dir(tmp_path):
+    (tmp_path / "clientes.csv").write_text(
+        "cpf,nome,data_nascimento,limite_atual,score\n"
+        "12345678901,Ana Souza,1990-05-14,2500.00,480\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "score_limite.csv").write_text("score_minimo,limite_maximo\n0,1000.00\n")
+    (tmp_path / "solicitacoes_aumento_limite.csv").write_text(
+        "cpf_cliente,data_hora_solicitacao,limite_atual,novo_limite_solicitado,status_pedido\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def credit_service(data_dir):
+    return CreditService(
+        CsvClientRepository(data_dir / "clientes.csv"),
+        CsvScoreLimitRepository(data_dir / "score_limite.csv"),
+        CsvLimitRequestRepository(data_dir / "solicitacoes_aumento_limite.csv"),
+    )
