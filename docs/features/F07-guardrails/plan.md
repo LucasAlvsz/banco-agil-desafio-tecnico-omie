@@ -119,7 +119,7 @@ Seguindo `docs/adr/000-template.md`, registrar:
   7. Teste na UI (`AppTest`) verificando que erro na inicialização registra log controlado sem expor detalhes sensíveis e que entrada bloqueada pelo guardrail é exibida amigavelmente mantendo o chat aberto.
 
 ## Critérios de Aceite
-- [ ] `make check` 100% verde (`ruff check`, `ruff format --check`, `mypy src` strict, `pytest --cov=banco_agil`).
-- [ ] Cobertura ≥ 95% nos módulos novos (`infrastructure/privacy.py` e `agents/guardrails.py`) e cobertura geral mantida ≥ 98%.
-- [ ] `docs/adr/006-guardrails-robustez-e-lgpd.md` criado seguindo `docs/adr/000-template.md`.
-- [ ] Commits pequenos em Conventional Commits na branch `feat/f07-guardrails` (incluindo `plan.md`).
+- [x] `make check` 100% verde (`ruff check`, `ruff format --check`, `mypy src` strict, `pytest --cov=banco_agil`).
+- [x] Cobertura ≥ 95% nos módulos novos (`infrastructure/privacy.py` e `agents/guardrails.py`) e cobertura geral mantida ≥ 98%.
+- [x] `docs/adr/006-guardrails-robustez-e-lgpd.md` criado seguindo `docs/adr/000-template.md`.
+- [x] Commits pequenos em Conventional Commits na branch `feat/f07-guardrails` (incluindo `plan.md`).
