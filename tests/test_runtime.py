@@ -57,8 +57,8 @@ def test_runtime_composes_dependencies_and_flushes_on_reset_and_close(
         assert runtime.get_state("thread") == {}
         assert runtime.get_state("other")
         assert client.flush.call_count == 2
-        runtime.reset_thread("thread-inexistente")
-        assert runtime.get_state("thread-inexistente") == {}
+        runtime.reset_thread("missing-thread")
+        assert runtime.get_state("missing-thread") == {}
         assert client.flush.call_count == 3
     runtime.close()
     assert client.flush.call_count == 4
