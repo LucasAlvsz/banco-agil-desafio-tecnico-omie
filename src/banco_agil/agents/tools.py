@@ -3,7 +3,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from math import isfinite
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, tool
@@ -11,7 +11,12 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command, interrupt
 from pydantic import StrictBool, StrictFloat, StrictInt
 
-from banco_agil.agents.state import ConversationState, has_authenticated_client
+from banco_agil.agents.state import (
+    ConversationState,
+    LimitIncreaseConfirmation,
+    LimitIncreaseDecision,
+    has_authenticated_client,
+)
 from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.models import ExchangeQuote
 from banco_agil.domain.repositories import ExchangeRateProvider
@@ -19,6 +24,7 @@ from banco_agil.domain.services import CreditService
 
 logger = logging.getLogger(__name__)
 MAX_AUTH_ATTEMPTS = 3
+_HANDOFF_EXTRA = "handoff"
 
 
 def _tool_result(
@@ -32,6 +38,20 @@ def _tool_result(
             "messages": [ToolMessage(content=content, tool_call_id=runtime.tool_call_id)],
         }
     )
+
+
+def _require_authenticated_client(
+    runtime: ToolRuntime[None, ConversationState],
+) -> str | Command[Any]:
+    if not has_authenticated_client(runtime.state):
+        return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+    cpf = runtime.state.get("client_cpf")
+    assert cpf
+    return cpf
+
+
+def is_handoff_tool(tool: BaseTool) -> bool:
+    return bool((tool.extras or {}).get(_HANDOFF_EXTRA))
 
 
 @tool
@@ -88,9 +108,9 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
     @tool
     def consultar_limite(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
         """Consulta o limite de crédito disponível do cliente autenticado."""
-        if not has_authenticated_client(runtime.state):
-            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
-        cpf = cast(str, runtime.state["client_cpf"])
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.get_client(cpf)
         except Exception as exc:
@@ -103,9 +123,9 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
         novo_limite: float, runtime: ToolRuntime[None, ConversationState]
     ) -> Command[Any]:
         """Solicita um novo limite em reais e abre a confirmação do cliente."""
-        if not has_authenticated_client(runtime.state):
-            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
-        cpf = cast(str, runtime.state["client_cpf"])
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.get_client(cpf)
         except Exception as exc:
@@ -125,14 +145,11 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
             )
 
         decision = interrupt(
-            {
-                "action": "confirm_limit_increase",
-                "limite_atual": client.limite_atual,
-                "novo_limite_solicitado": novo_limite,
-                "message": "Você confirma o pedido de aumento de limite?",
-            }
+            LimitIncreaseConfirmation(
+                limite_atual=client.limite_atual, novo_limite_solicitado=novo_limite
+            ).to_interrupt_payload()
         )
-        if not isinstance(decision, dict) or decision.get("approved") is not True:
+        if not LimitIncreaseDecision.is_approved(decision):
             return _tool_result(runtime, "Pedido de aumento de limite cancelado.")
 
         try:
@@ -157,7 +174,7 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
 
 
 def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
-    @tool
+    @tool(extras={_HANDOFF_EXTRA: True})
     def calcular_e_atualizar_score(
         renda_mensal: StrictFloat,
         tipo_emprego: str,
@@ -167,9 +184,9 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
         runtime: ToolRuntime[None, ConversationState],
     ) -> Command[Any]:
         """Recalcula e atualiza o score do cliente autenticado com os cinco dados da entrevista."""
-        if not has_authenticated_client(runtime.state):
-            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
-        cpf = cast(str, runtime.state["client_cpf"])
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.recalculate_score(
                 cpf,
@@ -219,8 +236,8 @@ def build_exchange_tools(exchange_provider: ExchangeRateProvider) -> list[BaseTo
         moeda: str = "USD", *, runtime: ToolRuntime[None, ConversationState]
     ) -> Command[Any]:
         """Consulta em reais a cotação da moeda informada. O padrão é USD."""
-        if not has_authenticated_client(runtime.state):
-            return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
         try:
             quote = _get_exchange_quote(exchange_provider, moeda)
         except DomainValidationError as exc:
@@ -249,30 +266,30 @@ def build_exchange_tools(exchange_provider: ExchangeRateProvider) -> list[BaseTo
 def _redirect(
     runtime: ToolRuntime[None, ConversationState], agent: Literal["credito", "entrevista", "cambio"]
 ) -> Command[Any]:
-    if not has_authenticated_client(runtime.state):
-        return _tool_result(runtime, "Autentique o cliente primeiro.", active_agent="triagem")
+    if isinstance(auth := _require_authenticated_client(runtime), Command):
+        return auth
     return _tool_result(runtime, "Continue o atendimento.", active_agent=agent)
 
 
-@tool
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua o atendimento sobre crédito após a autenticação do cliente."""
     return _redirect(runtime, "credito")
 
 
-@tool
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_entrevista(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua para a entrevista de crédito se o cliente autenticado aceitar a oferta."""
     return _redirect(runtime, "entrevista")
 
 
-@tool
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_cambio(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua o atendimento sobre câmbio após a autenticação do cliente."""
     return _redirect(runtime, "cambio")
 
 
-@tool
+@tool(extras={_HANDOFF_EXTRA: True})
 def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Retoma a triagem quando o cliente muda de assunto ou conclui o tópico atual."""
     return _tool_result(runtime, "Continue o atendimento.", active_agent="triagem")

@@ -27,9 +27,11 @@ def logs(isolated_logging):
 
 
 @pytest.fixture
-def offline_runtime(scripted_model, credit_service):
+def offline_runtime(scripted_model, credit_service, exchange_provider):
     return ConversationRuntime(
-        build_graph(scripted_model(responses=[AIMessage(content="Olá!")]), credit_service)
+        build_graph(
+            scripted_model(responses=[AIMessage(content="Olá!")]), credit_service, exchange_provider
+        )
     )
 
 
@@ -39,6 +41,20 @@ def test_openapi_preserves_agent_route_enum():
     assert telemetry_ref == "#/components/schemas/TurnTelemetry"
     route = schemas["TurnTelemetry"]["properties"]["agent_route"]
     assert route["items"]["enum"] == ["triagem", "credito", "entrevista", "cambio"]
+
+
+def test_openapi_preserves_pending_confirmation_schema():
+    schemas = api.create_app().openapi()["components"]["schemas"]
+    confirmation = schemas["ChatResponse"]["properties"]["pending_confirmation"]
+    assert confirmation["anyOf"] == [
+        {"$ref": "#/components/schemas/LimitIncreaseConfirmation"},
+        {"type": "null"},
+    ]
+
+    schema = schemas["LimitIncreaseConfirmation"]
+    fields = {"limite_atual", "novo_limite_solicitado", "message"}
+    assert set(schema["properties"]) == set(schema["required"]) == fields
+    assert schema["properties"]["message"] == {"type": "string", "title": "Message"}
 
 
 def test_import_does_not_initialize_runtime(monkeypatch):
@@ -97,7 +113,7 @@ def tool(name, **args):
 
 
 async def test_chat_keeps_thread_and_requires_confirmation(
-    scripted_model, credit_service, data_dir
+    scripted_model, credit_service, exchange_provider, data_dir
 ):
     (data_dir / "score_limite.csv").write_text("score_minimo,limite_maximo\n0,6000.00\n")
     requests = data_dir / "solicitacoes_aumento_limite.csv"
@@ -110,7 +126,9 @@ async def test_chat_keeps_thread_and_requires_confirmation(
             AIMessage(content=f"Seu pedido foi aprovado, Ana! {PII}"),
         ]
     )
-    app = api.create_app(runtime=ConversationRuntime(build_graph(model, credit_service)))
+    app = api.create_app(
+        runtime=ConversationRuntime(build_graph(model, credit_service, exchange_provider))
+    )
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
@@ -196,7 +214,9 @@ def test_unexpected_error_is_private(offline_runtime, monkeypatch, caplog):
     assert PII not in caplog.text
 
 
-async def test_serializes_turns_and_builds_independent_handlers(credit_service, scripted_model):
+async def test_serializes_turns_and_builds_independent_handlers(
+    credit_service, exchange_provider, scripted_model
+):
     loop = asyncio.get_running_loop()
     first_started = asyncio.Event()
     release = Event()
@@ -223,7 +243,9 @@ async def test_serializes_turns_and_builds_independent_handlers(credit_service, 
     handler_factory = Mock(side_effect=Capture)
     observer = TurnObservability(LangfuseObservability(sdk, handler_factory))
     conversation = ConversationRuntime(
-        build_graph(model, credit_service), observability=observer, owns_observability=True
+        build_graph(model, credit_service, exchange_provider),
+        observability=observer,
+        owns_observability=True,
     )
     app = api.create_app(runtime=conversation)
     async with (

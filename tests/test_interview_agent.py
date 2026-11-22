@@ -40,10 +40,10 @@ def interview_files(data_dir):
 
 
 @pytest.fixture
-def start_interview(scripted_model, credit_service, interview_files):
+def start_interview(scripted_model, credit_service, exchange_provider, interview_files):
     def start(*responses):
         model = scripted_model(responses=list(responses))
-        graph = build_graph(model, credit_service)
+        graph = build_graph(model, credit_service, exchange_provider)
         graph.update_state(
             CONFIG,
             {
@@ -227,7 +227,7 @@ def test_repository_errors_are_controlled_and_private(
 
 
 def test_rejected_request_interview_and_confirmed_resubmission(
-    scripted_model, credit_service, interview_files, monkeypatch
+    scripted_model, credit_service, exchange_provider, interview_files, monkeypatch
 ):
     class FixedDatetime(datetime):
         @classmethod
@@ -256,7 +256,7 @@ def test_rejected_request_interview_and_confirmed_resubmission(
             AIMessage(content="Pedido aprovado. Seu novo limite é de R$ 6.000."),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
 
     initial = turn(
         graph, f"Meu CPF é {CPF_INPUT}, nasci em {DATE_INPUT} e quero R$ 6.000 de limite."

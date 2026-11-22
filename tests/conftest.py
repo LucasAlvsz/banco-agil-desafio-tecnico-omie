@@ -1,6 +1,7 @@
 import logging
 import socket
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -10,6 +11,8 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field
 
 from banco_agil.config import Settings
+from banco_agil.domain.models import ExchangeQuote
+from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.csv_repositories import (
     CsvClientRepository,
@@ -109,6 +112,21 @@ def credit_service(data_dir):
         CsvScoreLimitRepository(data_dir / "score_limite.csv"),
         CsvLimitRequestRepository(data_dir / "solicitacoes_aumento_limite.csv"),
     )
+
+
+@pytest.fixture
+def exchange_provider() -> Iterator[ExchangeRateProvider]:
+    unexpected_quote = False
+    error = "Provedor de câmbio não esperado neste teste"
+
+    class UnexpectedExchangeProvider:
+        async def get_quote(self, currency: str = "USD") -> ExchangeQuote:
+            nonlocal unexpected_quote
+            unexpected_quote = True
+            raise AssertionError(error)
+
+    yield UnexpectedExchangeProvider()
+    assert not unexpected_quote, error
 
 
 @pytest.fixture

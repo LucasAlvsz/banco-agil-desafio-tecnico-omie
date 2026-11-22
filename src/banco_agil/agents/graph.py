@@ -32,18 +32,25 @@ from banco_agil.agents.prompts import (
     build_interview_prompt,
     build_triage_prompt,
 )
-from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
+from banco_agil.agents.state import AGENT_NODES as AGENT_NODES
+from banco_agil.agents.state import (
+    AgentName,
+    ConversationState,
+    LimitIncreaseDecision,
+    has_authenticated_client,
+)
+from banco_agil.agents.state import LimitIncreaseConfirmation as LimitIncreaseConfirmation
 from banco_agil.agents.tools import (
     build_credit_tools,
     build_exchange_tools,
     build_interview_tools,
     build_triage_tools,
     encerrar_atendimento,
+    is_handoff_tool,
     voltar_para_triagem,
 )
 from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
-from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import TurnObservability, TurnTelemetry
 
 logger = logging.getLogger(__name__)
@@ -53,26 +60,10 @@ ERROR_REPLY = "Não foi possível responder agora. Por favor, tente novamente em
 PENDING_REPLY = "Confirme ou cancele o pedido de aumento para continuar."
 NO_CONFIRMATION_REPLY = "Não há pedido de aumento aguardando confirmação."
 DEFAULT_RECURSION_LIMIT = 16
-AGENT_NODES = ("triagem", "credito", "entrevista", "cambio")
-HANDOFF_TOOLS = {
-    "calcular_e_atualizar_score",
-    "redirecionar_para_credito",
-    "redirecionar_para_entrevista",
-    "redirecionar_para_cambio",
-    "voltar_para_triagem",
-}
 
 type ConversationGraph = CompiledStateGraph[
     ConversationState, None, ConversationState, ConversationState
 ]
-
-
-class LimitIncreaseConfirmation(BaseModel):
-    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
-
-    limite_atual: float
-    novo_limite_solicitado: float
-    message: str
 
 
 class TurnResult(BaseModel):
@@ -100,7 +91,10 @@ def _route_agent(
 
 
 def _guard_tool_call(
-    request: ToolCallRequest, execute: Callable[[ToolCallRequest], ToolMessage | Command[Any]]
+    request: ToolCallRequest,
+    execute: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    *,
+    handoff_tools: frozenset[str],
 ) -> ToolMessage | Command[Any]:
     call_id = request.tool_call["id"] or ""
     if request.tool is None:
@@ -109,7 +103,7 @@ def _guard_tool_call(
     # Parallel tools share a snapshot. Allow one write per operation, with closure taking priority.
     last: AIMessage = request.state["messages"][-1]
     name = request.tool.name
-    group = HANDOFF_TOOLS if name in HANDOFF_TOOLS else {name}
+    group = handoff_tools if name in handoff_tools else {name}
     closing = next(
         (call for call in last.tool_calls if call["name"] == encerrar_atendimento.name), None
     )
@@ -133,6 +127,7 @@ def _add_agent_nodes(
     model: BaseChatModel,
     build_prompt: Callable[[ConversationState], str],
     tools: list[BaseTool],
+    handoff_tools: frozenset[str],
 ) -> None:
     def respond(state: ConversationState) -> dict[str, list[AIMessage]]:
         ended = state.get("conversation_ended", False)
@@ -151,7 +146,9 @@ def _add_agent_nodes(
     graph.add_node(
         tool_node,
         ToolNode(
-            tools, wrap_tool_call=_guard_tool_call, handle_tool_errors=_invalid_tool_arguments
+            tools,
+            wrap_tool_call=partial(_guard_tool_call, handoff_tools=handoff_tools),
+            handle_tool_errors=_invalid_tool_arguments,
         ),
     )
     graph.add_conditional_edges(agent, route_tools, {"tools": tool_node, END: END})
@@ -161,7 +158,8 @@ def _add_agent_nodes(
 def build_graph(
     model: BaseChatModel,
     credit_service: CreditService,
-    exchange_provider: ExchangeRateProvider | None = None,
+    exchange_provider: ExchangeRateProvider,
+    *,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> ConversationGraph:
     graph = StateGraph(ConversationState)
@@ -169,14 +167,15 @@ def build_graph(
     specialist_tools = [voltar_para_triagem, encerrar_atendimento]
     credit_tools = [*build_credit_tools(credit_service), *specialist_tools]
     interview_tools = [*build_interview_tools(credit_service), *specialist_tools]
-    provider = (
-        exchange_provider if exchange_provider is not None else McpExchangeRateProvider.in_memory()
+    exchange_tools = [*build_exchange_tools(exchange_provider), *specialist_tools]
+    all_tools = [*triage_tools, *credit_tools, *interview_tools, *exchange_tools]
+    handoff_tools = frozenset(tool.name for tool in all_tools if is_handoff_tool(tool))
+    _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools, handoff_tools)
+    _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools, handoff_tools)
+    _add_agent_nodes(
+        graph, "entrevista", model, build_interview_prompt, interview_tools, handoff_tools
     )
-    exchange_tools = [*build_exchange_tools(provider), *specialist_tools]
-    _add_agent_nodes(graph, "triagem", model, build_triage_prompt, triage_tools)
-    _add_agent_nodes(graph, "credito", model, build_credit_prompt, credit_tools)
-    _add_agent_nodes(graph, "entrevista", model, build_interview_prompt, interview_tools)
-    _add_agent_nodes(graph, "cambio", model, build_exchange_prompt, exchange_tools)
+    _add_agent_nodes(graph, "cambio", model, build_exchange_prompt, exchange_tools, handoff_tools)
     graph.add_conditional_edges(START, partial(_route_agent, at_entry=True), [*AGENT_NODES, END])
     return graph.compile(checkpointer=checkpointer if checkpointer is not None else InMemorySaver())
 
@@ -209,7 +208,7 @@ def resume_turn(
     return _execute_turn(
         graph,
         thread_id,
-        Command(resume={"approved": approved}),
+        Command(resume=LimitIncreaseDecision(approved=approved).to_resume_payload()),
         recursion_limit,
         callbacks,
         model_name,
@@ -219,9 +218,9 @@ def resume_turn(
 
 def _pending_confirmation(snapshot: StateSnapshot) -> LimitIncreaseConfirmation | None:
     for item in snapshot.interrupts:
-        value = item.value
-        if isinstance(value, dict) and value.get("action") == "confirm_limit_increase":
-            return LimitIncreaseConfirmation.model_validate(value)
+        confirmation = LimitIncreaseConfirmation.from_interrupt_value(item.value)
+        if confirmation is not None:
+            return confirmation
     return None
 
 
@@ -249,32 +248,32 @@ def _execute_turn(
     }
     state: ConversationState = {"messages": []}
     confirmation = None
-    reply: str | None
+    reply: str | None = None
     try:
         snapshot = graph.get_state(config)
         state = cast(ConversationState, snapshot.values)
         confirmation = _pending_confirmation(snapshot)
-        resuming = isinstance(turn_input, Command)
+        invocation: ConversationState | Command[Any] | None = None
         if state.get("conversation_ended"):
             reply = ENDED_REPLY
-        elif not resuming and snapshot.interrupts:
+        elif isinstance(turn_input, Command):
+            if confirmation is None:
+                reply = NO_CONFIRMATION_REPLY
+            else:
+                invocation = turn_input
+        elif snapshot.interrupts:
             reply = PENDING_REPLY
-        elif resuming and confirmation is None:
-            reply = NO_CONFIRMATION_REPLY
-        elif (
-            isinstance(turn_input, str)
-            and not (decision := evaluate_user_input(turn_input)).allowed
-        ):
-            if decision.reason != "empty":
-                logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
-            guardrail_blocked = True
-            reply = decision.reply
         else:
-            invocation: ConversationState | Command[Any] = (
-                {"messages": [HumanMessage(content=turn_input.replace("\x00", "").strip())]}
-                if isinstance(turn_input, str)
-                else turn_input
-            )
+            decision = evaluate_user_input(turn_input)
+            if decision.cleaned_text is not None:
+                invocation = {"messages": [HumanMessage(content=decision.cleaned_text)]}
+            else:
+                if decision.reason != "empty":
+                    logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
+                guardrail_blocked = True
+                reply = decision.reply
+
+        if invocation is not None:
             invoke_config: RunnableConfig = {**config, "callbacks": list(scope.callbacks)}
             if scope.metadata:
                 invoke_config["metadata"] = dict(scope.metadata)

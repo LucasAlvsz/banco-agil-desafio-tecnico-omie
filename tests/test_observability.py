@@ -139,7 +139,7 @@ def _tool(name, **args):
 
 
 def test_turn_and_resume_capture_route_tools_tokens_and_safe_metadata(
-    scripted_model, credit_service
+    scripted_model, credit_service, exchange_provider
 ):
     class Capture(BaseCallbackHandler):
         def on_chain_start(self, serialized, inputs, *, parent_run_id, metadata=None, **kwargs):
@@ -167,7 +167,7 @@ def test_turn_and_resume_capture_route_tools_tokens_and_safe_metadata(
             ValueError(PII),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     initial = run_turn(
         graph,
         thread_id=THREAD,
