@@ -248,32 +248,32 @@ def _execute_turn(
     }
     state: ConversationState = {"messages": []}
     confirmation = None
-    reply: str | None
+    reply: str | None = None
     try:
         snapshot = graph.get_state(config)
         state = cast(ConversationState, snapshot.values)
         confirmation = _pending_confirmation(snapshot)
-        resuming = isinstance(turn_input, Command)
+        invocation: ConversationState | Command[Any] | None = None
         if state.get("conversation_ended"):
             reply = ENDED_REPLY
-        elif not resuming and snapshot.interrupts:
-            reply = PENDING_REPLY
-        elif resuming and confirmation is None:
-            reply = NO_CONFIRMATION_REPLY
-        elif (
-            decision := evaluate_user_input(turn_input) if isinstance(turn_input, str) else None
-        ) is not None and not decision.allowed:
-            if decision.reason != "empty":
-                logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
-            guardrail_blocked = True
-            reply = decision.reply
-        else:
-            invocation: ConversationState | Command[Any]
-            if isinstance(turn_input, str):
-                assert decision is not None and decision.cleaned_text is not None
-                invocation = {"messages": [HumanMessage(content=decision.cleaned_text)]}
+        elif isinstance(turn_input, Command):
+            if confirmation is None:
+                reply = NO_CONFIRMATION_REPLY
             else:
                 invocation = turn_input
+        elif snapshot.interrupts:
+            reply = PENDING_REPLY
+        else:
+            decision = evaluate_user_input(turn_input)
+            if decision.cleaned_text is not None:
+                invocation = {"messages": [HumanMessage(content=decision.cleaned_text)]}
+            else:
+                if decision.reason != "empty":
+                    logger.warning("Entrada bloqueada por guardrail (%s)", decision.reason)
+                guardrail_blocked = True
+                reply = decision.reply
+
+        if invocation is not None:
             invoke_config: RunnableConfig = {**config, "callbacks": list(scope.callbacks)}
             if scope.metadata:
                 invoke_config["metadata"] = dict(scope.metadata)

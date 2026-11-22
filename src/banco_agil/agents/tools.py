@@ -24,6 +24,7 @@ from banco_agil.domain.services import CreditService
 
 logger = logging.getLogger(__name__)
 MAX_AUTH_ATTEMPTS = 3
+_HANDOFF_EXTRA = "handoff"
 
 
 def _tool_result(
@@ -50,7 +51,7 @@ def _require_authenticated_client(
 
 
 def is_handoff_tool(tool: BaseTool) -> bool:
-    return bool((tool.extras or {}).get("handoff"))
+    return bool((tool.extras or {}).get(_HANDOFF_EXTRA))
 
 
 @tool
@@ -107,8 +108,9 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
     @tool
     def consultar_limite(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
         """Consulta o limite de crédito disponível do cliente autenticado."""
-        if isinstance(cpf := _require_authenticated_client(runtime), Command):
-            return cpf
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.get_client(cpf)
         except Exception as exc:
@@ -121,8 +123,9 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
         novo_limite: float, runtime: ToolRuntime[None, ConversationState]
     ) -> Command[Any]:
         """Solicita um novo limite em reais e abre a confirmação do cliente."""
-        if isinstance(cpf := _require_authenticated_client(runtime), Command):
-            return cpf
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.get_client(cpf)
         except Exception as exc:
@@ -171,7 +174,7 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
 
 
 def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
-    @tool(extras={"handoff": True})
+    @tool(extras={_HANDOFF_EXTRA: True})
     def calcular_e_atualizar_score(
         renda_mensal: StrictFloat,
         tipo_emprego: str,
@@ -181,8 +184,9 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
         runtime: ToolRuntime[None, ConversationState],
     ) -> Command[Any]:
         """Recalcula e atualiza o score do cliente autenticado com os cinco dados da entrevista."""
-        if isinstance(cpf := _require_authenticated_client(runtime), Command):
-            return cpf
+        if isinstance(auth := _require_authenticated_client(runtime), Command):
+            return auth
+        cpf = auth
         try:
             client = credit_service.recalculate_score(
                 cpf,
@@ -267,25 +271,25 @@ def _redirect(
     return _tool_result(runtime, "Continue o atendimento.", active_agent=agent)
 
 
-@tool(extras={"handoff": True})
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua o atendimento sobre crédito após a autenticação do cliente."""
     return _redirect(runtime, "credito")
 
 
-@tool(extras={"handoff": True})
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_entrevista(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua para a entrevista de crédito se o cliente autenticado aceitar a oferta."""
     return _redirect(runtime, "entrevista")
 
 
-@tool(extras={"handoff": True})
+@tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_cambio(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Continua o atendimento sobre câmbio após a autenticação do cliente."""
     return _redirect(runtime, "cambio")
 
 
-@tool(extras={"handoff": True})
+@tool(extras={_HANDOFF_EXTRA: True})
 def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
     """Retoma a triagem quando o cliente muda de assunto ou conclui o tópico atual."""
     return _tool_result(runtime, "Continue o atendimento.", active_agent="triagem")

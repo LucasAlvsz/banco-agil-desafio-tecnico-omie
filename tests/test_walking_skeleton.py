@@ -30,7 +30,9 @@ def test_graph_requires_exchange_provider(scripted_model, credit_service):
 
 
 def test_graph_has_no_mcp_exchange_dependency():
-    assert "mcp_exchange_client" not in inspect.getsource(agent_graph)
+    source = inspect.getsource(agent_graph)
+    assert "mcp_exchange_client" not in source
+    assert "McpExchangeRateProvider" not in source
 
 
 def test_history_and_session_isolation(credit_service, exchange_provider, scripted_model):
