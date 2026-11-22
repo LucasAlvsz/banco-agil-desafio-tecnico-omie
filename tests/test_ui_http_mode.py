@@ -76,10 +76,12 @@ def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog, chat
         ]
     )
     posts = []
+    health_probes = []
 
     def respond(request):
         assert set(request.extensions["timeout"].values()) == {3.5}
         if request.url.path == "/health":
+            health_probes.append(request.url.path)
             return httpx.Response(200, json={"langfuse_enabled": False})
         assert request.url.path == "/api/v1/chat"
         posts.append(json.loads(request.content))
@@ -92,12 +94,13 @@ def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog, chat
 
     monkeypatch.setenv("API_BASE_URL", INTERNAL_URL + "/")
     monkeypatch.setenv("API_TIMEOUT_SECONDS", "3.5")
-    monkeypatch.setattr("banco_agil.ui.app.HttpChatClient", client_factory)
+    monkeypatch.setattr("banco_agil.ui.client.HttpChatClient", client_factory)
     runtime_factory = Mock(side_effect=AssertionError("O runtime deve rodar na API"))
     monkeypatch.setattr("banco_agil.runtime.ConversationRuntime.from_settings", runtime_factory)
 
     app = AppTest.from_string(APP).run()
     initial_thread = app.session_state.thread_id
+    previous_client = app.session_state.client
     assert [item.value for item in app.sidebar.caption] == [
         "Local (Langfuse desativado)",
         "API HTTP",
@@ -145,12 +148,14 @@ def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog, chat
     app.sidebar.button[0].click().run()
     assert not app.exception
     assert app.session_state.thread_id != "api-thread"
+    assert app.session_state.client is previous_client
+    assert health_probes == ["/health"]
     assert not app.chat_message
     assert not app.chat_input[0].disabled
     runtime_factory.assert_not_called()
     errors = [record for record in caplog.records if record.name == "banco_agil.ui.app"]
     assert [record.getMessage() for record in errors] == [
-        "Falha na comunicação com a API (ApiClientError)"
+        "Falha ao enviar turno (ApiClientError)"
     ] * 2
     assert PII not in caplog.text
     assert INTERNAL_URL not in caplog.text
