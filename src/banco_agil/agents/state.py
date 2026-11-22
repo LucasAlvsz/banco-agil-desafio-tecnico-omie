@@ -2,7 +2,7 @@ from typing import Annotated, Any, Literal, NotRequired, Self, TypedDict, get_ar
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 AgentName = Literal["triagem", "credito", "entrevista", "cambio"]
 AGENT_NODES: tuple[AgentName, ...] = get_args(AgentName)
@@ -11,11 +11,14 @@ DEFAULT_LIMIT_INCREASE_CONFIRMATION_MESSAGE = "Você confirma o pedido de aument
 
 
 class LimitIncreaseConfirmation(BaseModel):
-    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        frozen=True, allow_inf_nan=False, json_schema_serialization_defaults_required=True
+    )
 
     limite_atual: float
     novo_limite_solicitado: float
-    message: str = DEFAULT_LIMIT_INCREASE_CONFIRMATION_MESSAGE
+    # Keep the OpenAPI response field required while supplying the message internally.
+    message: str = Field(default_factory=lambda: DEFAULT_LIMIT_INCREASE_CONFIRMATION_MESSAGE)
 
     def to_interrupt_payload(self) -> dict[str, Any]:
         return {"action": CONFIRM_LIMIT_INCREASE_ACTION, **self.model_dump()}

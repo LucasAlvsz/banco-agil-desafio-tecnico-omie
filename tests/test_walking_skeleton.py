@@ -1,3 +1,4 @@
+import inspect
 import logging
 
 import pytest
@@ -5,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 
+from banco_agil.agents import graph as agent_graph
 from banco_agil.agents.graph import ENDED_REPLY, ERROR_REPLY, TurnResult, build_graph, run_turn
 
 
@@ -22,12 +24,21 @@ def closing_call():
     )
 
 
-def test_history_and_session_isolation(credit_service, scripted_model):
+def test_graph_requires_exchange_provider(scripted_model, credit_service):
+    with pytest.raises(TypeError, match="exchange_provider"):
+        build_graph(scripted_model(responses=[]), credit_service)
+
+
+def test_graph_has_no_mcp_exchange_dependency():
+    assert "mcp_exchange_client" not in inspect.getsource(agent_graph)
+
+
+def test_history_and_session_isolation(credit_service, exchange_provider, scripted_model):
     model = scripted_model(
         responses=[AIMessage(content=text) for text in ["Olá!", "Claro!", "Bem-vindo!"]]
     )
     saver = InMemorySaver()
-    graph = build_graph(model, credit_service, checkpointer=saver)
+    graph = build_graph(model, credit_service, exchange_provider, checkpointer=saver)
     assert graph.checkpointer is saver
     assert run_turn(graph, thread_id="one", user_message="Olá").reply == "Olá!"
     assert run_turn(graph, thread_id="one", user_message="Pode ajudar?").reply == "Claro!"
@@ -40,7 +51,9 @@ def test_history_and_session_isolation(credit_service, scripted_model):
     assert all("Banco Ágil" in call["messages"][0].content for call in model.calls)
 
 
-def test_tool_command_ends_session_and_farewell_has_no_tools(credit_service, scripted_model):
+def test_tool_command_ends_session_and_farewell_has_no_tools(
+    credit_service, exchange_provider, scripted_model
+):
     model = scripted_model(
         responses=[
             closing_call(),
@@ -52,7 +65,7 @@ def test_tool_command_ends_session_and_farewell_has_no_tools(credit_service, scr
             ),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = run_turn(graph, thread_id="one", user_message="Quero encerrar")
     assert result.reply == "Até logo!"
     assert result.conversation_ended and not result.authenticated
@@ -77,21 +90,25 @@ def test_tool_command_ends_session_and_farewell_has_no_tools(credit_service, scr
 
 
 @pytest.mark.parametrize("message", ["", " \n\t "])
-def test_empty_input_does_not_call_model(credit_service, scripted_model, message):
+def test_empty_input_does_not_call_model(
+    credit_service, exchange_provider, scripted_model, message
+):
     model = scripted_model(responses=[])
-    result = run_turn(build_graph(model, credit_service), thread_id="one", user_message=message)
+    result = run_turn(
+        build_graph(model, credit_service, exchange_provider), thread_id="one", user_message=message
+    )
     assert result.reply == "Por favor, escreva uma mensagem."
     assert not result.conversation_ended
     assert model.calls == []
 
 
 def test_provider_failure_is_safe_and_retry_preserves_history(
-    credit_service, scripted_model, caplog
+    credit_service, exchange_provider, scripted_model, caplog
 ):
     model = scripted_model(
         responses=[RuntimeError("private-key-and-PII"), AIMessage(content="Voltei!")]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = run_turn(graph, thread_id="one", user_message="Olá")
     assert result.reply == ERROR_REPLY
     assert not result.conversation_ended and not result.authenticated
@@ -108,9 +125,9 @@ def test_provider_failure_is_safe_and_retry_preserves_history(
     assert [m.content for m in model.calls[1]["messages"][1:]] == ["Olá", "Tentar de novo"]
 
 
-def test_failure_after_tool_keeps_session_closed(credit_service, scripted_model):
+def test_failure_after_tool_keeps_session_closed(credit_service, exchange_provider, scripted_model):
     model = scripted_model(responses=[closing_call(), RuntimeError("private-provider-error")])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = run_turn(graph, thread_id="one", user_message="Encerrar")
     assert result.reply == ERROR_REPLY
     assert result.conversation_ended and not result.authenticated
@@ -121,15 +138,21 @@ def test_failure_after_tool_keeps_session_closed(credit_service, scripted_model)
 
 
 @pytest.mark.parametrize("content", ["", [{"type": "image_url", "image_url": "ignored"}]])
-def test_missing_text_has_controlled_fallback(credit_service, scripted_model, content):
+def test_missing_text_has_controlled_fallback(
+    credit_service, exchange_provider, scripted_model, content
+):
     model = scripted_model(responses=[AIMessage(content=content)])
-    result = run_turn(build_graph(model, credit_service), thread_id="one", user_message="Oi")
+    result = run_turn(
+        build_graph(model, credit_service, exchange_provider), thread_id="one", user_message="Oi"
+    )
     assert result.reply == ERROR_REPLY
     assert not result.conversation_ended
 
 
-def test_checkpoint_failure_is_controlled(credit_service, scripted_model, monkeypatch):
-    graph = build_graph(scripted_model(responses=[]), credit_service)
+def test_checkpoint_failure_is_controlled(
+    credit_service, exchange_provider, scripted_model, monkeypatch
+):
+    graph = build_graph(scripted_model(responses=[]), credit_service, exchange_provider)
 
     def fail(*args, **kwargs):
         raise RuntimeError("private-checkpoint-error")

@@ -147,10 +147,10 @@ def test_guardrail_decision_rejects_inconsistent_fields(fields):
     ],
 )
 def test_blocked_turn_keeps_checkpoint_and_logs_only_reason(
-    scripted_model, credit_service, caplog, message, reply, reason
+    scripted_model, credit_service, exchange_provider, caplog, message, reply, reason
 ):
     model = scripted_model(responses=[])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     start_authenticated(graph)
     before = graph.get_state(CONFIG)
 
@@ -165,17 +165,21 @@ def test_blocked_turn_keeps_checkpoint_and_logs_only_reason(
     assert CPF not in caplog.text and BIRTH_DATE not in caplog.text
 
 
-def test_turn_strips_null_bytes_and_masks_secrets(scripted_model, credit_service):
+def test_turn_strips_null_bytes_and_masks_secrets(
+    scripted_model, credit_service, exchange_provider
+):
     model = scripted_model(responses=[AIMessage(content="gsk_example, Bearer example.token")])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = run_turn(graph, thread_id=THREAD, user_message=" \nQuero consultar meu li\x00mite. ")
     assert model.calls[0]["messages"][-1].content == "Quero consultar meu limite."
     assert result.reply == "[dado omitido], [dado omitido]"
 
 
-def test_ended_session_takes_priority_over_guardrail(scripted_model, credit_service, caplog):
+def test_ended_session_takes_priority_over_guardrail(
+    scripted_model, credit_service, exchange_provider, caplog
+):
     model = scripted_model(responses=[])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     graph.update_state(CONFIG, {"conversation_ended": True}, as_node="triagem")
     before = graph.get_state(CONFIG)
     result = run_turn(graph, thread_id=THREAD, user_message=ATTEMPT)
@@ -184,9 +188,11 @@ def test_ended_session_takes_priority_over_guardrail(scripted_model, credit_serv
     assert not model.calls and not caplog.records
 
 
-def test_pending_confirmation_takes_priority_over_guardrail(scripted_model, credit_service, caplog):
+def test_pending_confirmation_takes_priority_over_guardrail(
+    scripted_model, credit_service, exchange_provider, caplog
+):
     model = scripted_model(responses=[tool_call("solicitar_aumento_limite", {"novo_limite": 3000})])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     start_authenticated(graph)
     initial = run_turn(graph, thread_id=THREAD, user_message="Quero aumentar meu limite.")
     before = graph.get_state(CONFIG)
@@ -198,8 +204,8 @@ def test_pending_confirmation_takes_priority_over_guardrail(scripted_model, cred
     assert len(model.calls) == 1 and not caplog.records
 
 
-def test_recursion_limit_must_be_at_least_two(scripted_model, credit_service):
-    graph = build_graph(scripted_model(responses=[]), credit_service)
+def test_recursion_limit_must_be_at_least_two(scripted_model, credit_service, exchange_provider):
+    graph = build_graph(scripted_model(responses=[]), credit_service, exchange_provider)
     with pytest.raises(ValueError, match="recursion_limit"):
         run_turn(graph, thread_id=THREAD, user_message="Olá", recursion_limit=1)
     with pytest.raises(ValueError, match="recursion_limit"):
@@ -211,7 +217,7 @@ def test_recursion_limit_must_be_at_least_two(scripted_model, credit_service):
     [({}, DEFAULT_RECURSION_LIMIT // 2), ({"recursion_limit": 3}, 2)],
 )
 def test_recursion_limit_ends_the_loop_and_session_can_continue(
-    scripted_model, credit_service, caplog, limit_config, rounds
+    scripted_model, credit_service, exchange_provider, caplog, limit_config, rounds
 ):
     model = scripted_model(
         responses=[
@@ -219,7 +225,7 @@ def test_recursion_limit_ends_the_loop_and_session_can_continue(
             AIMessage(content="Atendimento retomado."),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     start_authenticated(graph)
     result = run_turn(graph, thread_id=THREAD, user_message="Limite?", **limit_config)
     assert result.reply == RECURSION_LIMIT_REPLY
@@ -241,7 +247,7 @@ def test_recursion_limit_ends_the_loop_and_session_can_continue(
 
 
 def test_recursion_limit_after_resume_preserves_completed_request(
-    scripted_model, credit_service, data_dir
+    scripted_model, credit_service, exchange_provider, data_dir
 ):
     model = scripted_model(
         responses=[
@@ -251,7 +257,7 @@ def test_recursion_limit_after_resume_preserves_completed_request(
             AIMessage(content="Atendimento retomado."),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     start_authenticated(graph)
     initial = run_turn(graph, thread_id=THREAD, user_message="Quero aumentar meu limite.")
     assert initial.pending_confirmation is not None
@@ -327,6 +333,7 @@ def test_recursion_limit_after_resume_preserves_completed_request(
 def test_unexpected_service_failure_stays_in_tool_and_keeps_details_private(
     scripted_model,
     credit_service,
+    exchange_provider,
     monkeypatch,
     caplog,
     data_dir,
@@ -345,7 +352,7 @@ def test_unexpected_service_failure_stays_in_tool_and_keeps_details_private(
     requests = data_dir / "solicitacoes_aumento_limite.csv"
     original = (clients.read_bytes(), requests.read_bytes())
     model = scripted_model(responses=[tool_call(name, args), AIMessage(content=expected)])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     if agent != "triagem":
         start_authenticated(graph, agent)
 

@@ -56,11 +56,12 @@ def assert_no_personal_data(text):
         assert value not in text
 
 
-def test_handoff_tools_are_marked_without_exposing_metadata(credit_service):
+def test_handoff_tools_are_marked_without_exposing_metadata(credit_service, exchange_provider):
     registered = [
         *agent_tools.build_triage_tools(credit_service),
         *agent_tools.build_credit_tools(credit_service),
         *agent_tools.build_interview_tools(credit_service),
+        *agent_tools.build_exchange_tools(exchange_provider),
         agent_tools.voltar_para_triagem,
         agent_tools.encerrar_atendimento,
     ]
@@ -77,7 +78,7 @@ def test_handoff_tools_are_marked_without_exposing_metadata(credit_service):
         assert "extras" not in schema["function"]
 
 
-def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
+def test_physical_tool_isolation_and_schema(scripted_model, credit_service, exchange_provider):
     model = scripted_model(
         responses=[
             tool_step(auth()),
@@ -87,7 +88,7 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
             AIMessage(content="Qual moeda você quer consultar?"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     assert turn(graph).active_agent == "cambio"
 
     nodes = graph.get_graph().nodes
@@ -123,7 +124,7 @@ def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
 
 
 def test_success_resets_attempts_and_reauthentication_preserves_identity(
-    scripted_model, credit_service, monkeypatch
+    scripted_model, credit_service, exchange_provider, monkeypatch
 ):
     model = scripted_model(
         responses=[
@@ -135,7 +136,7 @@ def test_success_resets_attempts_and_reauthentication_preserves_identity(
             AIMessage(content="Como posso ajudar?"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     assert not turn(graph).authenticated
     assert checkpoint(graph)["auth_attempts"] == 1
     result = turn(graph, f"{CPF} e {BIRTH_DATE}")
@@ -165,7 +166,7 @@ def test_success_resets_attempts_and_reauthentication_preserves_identity(
     assert tool_messages(state)[-1].content == "O cliente já está autenticado."
 
 
-def test_invalid_formats_do_not_consume_attempts(scripted_model, credit_service):
+def test_invalid_formats_do_not_consume_attempts(scripted_model, credit_service, exchange_provider):
     inputs = [
         {"cpf": "1234567890"},
         {"date": "31/02/1990"},
@@ -179,7 +180,7 @@ def test_invalid_formats_do_not_consume_attempts(scripted_model, credit_service)
             tool_step(auth(str(index), **values)),
             AIMessage(content="Confira o formato dos dados."),
         ]
-    graph = build_graph(scripted_model(responses=responses), credit_service)
+    graph = build_graph(scripted_model(responses=responses), credit_service, exchange_provider)
 
     for _ in inputs:
         result = turn(graph)
@@ -191,7 +192,9 @@ def test_invalid_formats_do_not_consume_attempts(scripted_model, credit_service)
         )
 
 
-def test_third_mismatch_closes_session_with_unbound_farewell(scripted_model, credit_service):
+def test_third_mismatch_closes_session_with_unbound_farewell(
+    scripted_model, credit_service, exchange_provider
+):
     model = scripted_model(
         responses=[
             tool_step(auth("wrong-date", date="15/05/1990")),
@@ -202,7 +205,7 @@ def test_third_mismatch_closes_session_with_unbound_farewell(scripted_model, cre
             AIMessage(content="Vou encerrar por segurança. Até logo!"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
 
     for count in range(1, 4):
         result = turn(graph)
@@ -222,7 +225,7 @@ def test_third_mismatch_closes_session_with_unbound_farewell(scripted_model, cre
 
 
 def test_persistence_failure_is_controlled_and_private(
-    scripted_model, credit_service, monkeypatch, caplog
+    scripted_model, credit_service, exchange_provider, monkeypatch, caplog
 ):
     def fail(*args):
         raise PersistenceError(f"Erro de leitura: {CPF} {BIRTH_DATE}")
@@ -231,7 +234,7 @@ def test_persistence_failure_is_controlled_and_private(
     model = scripted_model(
         responses=[tool_step(auth()), AIMessage(content="Tente novamente em instantes.")]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     assert turn(graph).reply == "Tente novamente em instantes."
     state = checkpoint(graph)
     assert state.get("auth_attempts", 0) == 0
@@ -244,7 +247,7 @@ def test_persistence_failure_is_controlled_and_private(
 @pytest.mark.parametrize("agent", ["credito", "cambio"])
 @pytest.mark.parametrize("authenticated", [False, True])
 def test_redirect_requires_authenticated_identity(
-    scripted_model, credit_service, agent, authenticated
+    scripted_model, credit_service, exchange_provider, agent, authenticated
 ):
     model = scripted_model(
         responses=[
@@ -252,7 +255,7 @@ def test_redirect_requires_authenticated_identity(
             AIMessage(content="Precisamos confirmar sua identidade."),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     graph.update_state(
         CONFIG,
         {"authenticated": authenticated, "messages": [AIMessage(content="Olá!")]},
@@ -278,10 +281,10 @@ def test_redirect_requires_authenticated_identity(
     ],
 )
 def test_entry_routes_to_triage_when_gate_or_registration_fails(
-    scripted_model, credit_service, authenticated, client_cpf, active_agent
+    scripted_model, credit_service, exchange_provider, authenticated, client_cpf, active_agent
 ):
     model = scripted_model(responses=[AIMessage(content="Olá!")])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     graph.update_state(
         CONFIG,
         {
@@ -302,7 +305,7 @@ def test_entry_routes_to_triage_when_gate_or_registration_fails(
 
 @pytest.mark.parametrize("agent", ["credito", "cambio"])
 def test_same_turn_handoff_persists_and_return_preserves_authentication(
-    scripted_model, credit_service, agent
+    scripted_model, credit_service, exchange_provider, agent
 ):
     model = scripted_model(
         responses=[
@@ -313,7 +316,7 @@ def test_same_turn_handoff_persists_and_return_preserves_authentication(
             AIMessage(content="Ana Souza, sobre o que quer conversar?"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = turn(graph, f"{CPF}, {BIRTH_DATE}")
     assert result.active_agent == checkpoint(graph)["active_agent"] == agent
     assert result.authenticated
@@ -332,7 +335,9 @@ def test_same_turn_handoff_persists_and_return_preserves_authentication(
     assert "solicite CPF" not in model.calls[4]["messages"][0].text
 
 
-def test_parallel_auth_and_redirect_use_pre_auth_snapshot(scripted_model, credit_service):
+def test_parallel_auth_and_redirect_use_pre_auth_snapshot(
+    scripted_model, credit_service, exchange_provider
+):
     model = scripted_model(
         responses=[
             tool_step(auth(), call("redirecionar_para_credito", "early")),
@@ -340,7 +345,7 @@ def test_parallel_auth_and_redirect_use_pre_auth_snapshot(scripted_model, credit
             AIMessage(content="Como posso ajudar com seu crédito?"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = turn(graph)
     assert result.active_agent == "credito"
     assert result.authenticated
@@ -352,7 +357,7 @@ def test_parallel_auth_and_redirect_use_pre_auth_snapshot(scripted_model, credit
 
 
 def test_parallel_duplicate_calls_keep_state_writes_and_tool_responses_consistent(
-    scripted_model, credit_service
+    scripted_model, credit_service, exchange_provider
 ):
     model = scripted_model(
         responses=[
@@ -364,7 +369,7 @@ def test_parallel_duplicate_calls_keep_state_writes_and_tool_responses_consisten
             AIMessage(content="Como posso ajudar com seu crédito?"),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = turn(graph)
     assert result.authenticated and result.active_agent == "credito"
     messages = tool_messages(checkpoint(graph))
@@ -377,7 +382,9 @@ def test_parallel_duplicate_calls_keep_state_writes_and_tool_responses_consisten
     assert [message.status for message in messages] == ["success", "error", "success", "error"]
 
 
-def test_closure_takes_priority_over_other_calls_in_the_batch(scripted_model, credit_service):
+def test_closure_takes_priority_over_other_calls_in_the_batch(
+    scripted_model, credit_service, exchange_provider
+):
     close = call("encerrar_atendimento", "close", motivo="Pedido do cliente")
     model = scripted_model(
         responses=[
@@ -385,7 +392,7 @@ def test_closure_takes_priority_over_other_calls_in_the_batch(scripted_model, cr
             AIMessage(content="Até logo!", tool_calls=[close]),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = turn(graph)
     assert result.conversation_ended and not result.authenticated
     assert result.reply == "Até logo!"
@@ -396,7 +403,7 @@ def test_closure_takes_priority_over_other_calls_in_the_batch(scripted_model, cr
 
 
 def test_specialist_cannot_execute_triage_tool_and_errors_hide_model_input(
-    scripted_model, credit_service
+    scripted_model, credit_service, exchange_provider
 ):
     model = scripted_model(
         responses=[
@@ -414,7 +421,7 @@ def test_specialist_cannot_execute_triage_tool_and_errors_hide_model_input(
             ),
         ]
     )
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     result = turn(graph)
     assert result.authenticated and result.active_agent == "credito"
     assert result.reply == (
@@ -429,10 +436,10 @@ def test_specialist_cannot_execute_triage_tool_and_errors_hide_model_input(
 
 @pytest.mark.parametrize("legacy_authenticated", [False, True])
 def test_dates_are_masked_without_verified_birth_date(
-    scripted_model, credit_service, legacy_authenticated
+    scripted_model, credit_service, exchange_provider, legacy_authenticated
 ):
     model = scripted_model(responses=[AIMessage(content=f"Confira {CPF} e {BIRTH_DATE}.")])
-    graph = build_graph(model, credit_service)
+    graph = build_graph(model, credit_service, exchange_provider)
     if legacy_authenticated:
         graph.update_state(
             CONFIG,

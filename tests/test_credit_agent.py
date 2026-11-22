@@ -54,10 +54,10 @@ def credit_files(data_dir, monkeypatch):
 
 
 @pytest.fixture
-def credit_session(scripted_model, credit_service, credit_files):
+def credit_session(scripted_model, credit_service, exchange_provider, credit_files):
     def start(*responses, cpf=ANA):
         model = scripted_model(responses=list(responses))
-        graph = build_graph(model, credit_service)
+        graph = build_graph(model, credit_service, exchange_provider)
         graph.update_state(
             CONFIG,
             {
