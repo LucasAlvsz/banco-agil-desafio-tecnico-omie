@@ -1,8 +1,8 @@
 import re
 import unicodedata
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from banco_agil.agents.state import ConversationState, has_authenticated_client
 from banco_agil.infrastructure.privacy import mask_pii
@@ -46,6 +46,18 @@ class InputGuardrailDecision(BaseModel):
     allowed: bool
     reason: Literal["ok", "empty", "too_long", "prompt_injection"] = "ok"
     reply: str | None = None
+    cleaned_text: str | None = None
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> Self:
+        if self.allowed:
+            if self.reason != "ok" or self.reply is not None or not self.cleaned_text:
+                raise ValueError("Allowed input requires cleaned text, reason 'ok' and no reply")
+        elif self.reason == "ok" or not self.reply or self.cleaned_text is not None:
+            raise ValueError(
+                "Blocked input requires a rejection reason and reply, with no cleaned text"
+            )
+        return self
 
 
 def evaluate_user_input(
@@ -66,7 +78,7 @@ def evaluate_user_input(
         return InputGuardrailDecision(
             allowed=False, reason="prompt_injection", reply=GUARDRAIL_BLOCKED_REPLY
         )
-    return InputGuardrailDecision(allowed=True)
+    return InputGuardrailDecision(allowed=True, cleaned_text=cleaned)
 
 
 def sanitize_reply(reply: str, state: ConversationState) -> str:

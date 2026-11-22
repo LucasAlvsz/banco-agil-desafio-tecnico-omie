@@ -19,6 +19,7 @@ from banco_agil.agents.guardrails import (
     MAX_USER_MESSAGE_CHARS,
     RECURSION_LIMIT_REPLY,
     TOO_LONG_INPUT_REPLY,
+    InputGuardrailDecision,
     evaluate_user_input,
 )
 from banco_agil.agents.prompts import (
@@ -69,6 +70,7 @@ def start_authenticated(graph, agent="credito"):
 def test_allows_legitimate_banking_and_out_of_scope_requests(message):
     decision = evaluate_user_input(message)
     assert decision.allowed and decision.reason == "ok" and decision.reply is None
+    assert decision.cleaned_text == message
 
 
 @pytest.mark.parametrize(
@@ -103,16 +105,38 @@ def test_blocks_high_confidence_prompt_manipulation(message):
     assert not decision.allowed
     assert decision.reason == "prompt_injection"
     assert decision.reply == GUARDRAIL_BLOCKED_REPLY
+    assert decision.cleaned_text is None
 
 
 def test_rejects_empty_and_long_input():
     empty = evaluate_user_input(" \x00\t")
     assert not empty.allowed and empty.reason == "empty" and empty.reply == EMPTY_INPUT_REPLY
-    assert evaluate_user_input(" limite\x00 ", max_chars=6).allowed
+    assert empty.cleaned_text is None
+    allowed = evaluate_user_input(" limite\x00 ", max_chars=6)
+    assert allowed.allowed and allowed.cleaned_text == "limite"
     long = evaluate_user_input("limite extra", max_chars=6)
     assert not long.allowed and long.reason == "too_long" and long.reply == TOO_LONG_INPUT_REPLY
+    assert long.cleaned_text is None
     with pytest.raises(ValidationError, match="frozen"):
         long.allowed = True
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"allowed": True},
+        {"allowed": True, "cleaned_text": ""},
+        {"allowed": True, "cleaned_text": "Olá", "reason": "empty"},
+        {"allowed": True, "cleaned_text": "Olá", "reply": "Bloqueado"},
+        {"allowed": False, "reply": "Bloqueado"},
+        {"allowed": False, "reason": "empty"},
+        {"allowed": False, "reason": "empty", "reply": ""},
+        {"allowed": False, "reason": "empty", "reply": "Bloqueado", "cleaned_text": "Olá"},
+    ],
+)
+def test_guardrail_decision_rejects_inconsistent_fields(fields):
+    with pytest.raises(ValidationError):
+        InputGuardrailDecision(**fields)
 
 
 @pytest.mark.parametrize(
