@@ -109,3 +109,20 @@ def credit_service(data_dir):
         CsvScoreLimitRepository(data_dir / "score_limite.csv"),
         CsvLimitRequestRepository(data_dir / "solicitacoes_aumento_limite.csv"),
     )
+
+
+@pytest.fixture
+def chat_response():
+    def make_response(**changes):
+        return {
+            "thread_id": "api-thread",
+            "reply": "Resposta",
+            "conversation_ended": False,
+            "active_agent": "credito",
+            "authenticated": True,
+            "pending_confirmation": None,
+            "telemetry": {"latency_ms": 5, "total_tokens": 7, "agent_route": ["credito"]},
+            "langfuse_enabled": False,
+        } | changes
+
+    return make_response

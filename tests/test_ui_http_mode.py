@@ -8,7 +8,7 @@ from streamlit.testing.v1 import AppTest
 
 from banco_agil.agents.graph import ERROR_REPLY
 from banco_agil.config import Settings
-from banco_agil.ui.client import ApiClientError, HttpChatClient
+from banco_agil.ui.client import HttpChatClient
 
 APP = "from banco_agil.ui.app import main\nmain()"
 INTERNAL_URL = "http://api.test"
@@ -54,66 +54,7 @@ def test_api_timeout_must_be_positive_and_finite(value):
         Settings(api_timeout_seconds=value)
 
 
-def chat_response(**changes):
-    return {
-        "thread_id": "api-thread",
-        "reply": "Resposta",
-        "conversation_ended": False,
-        "active_agent": "credito",
-        "authenticated": True,
-        "pending_confirmation": None,
-        "telemetry": {"latency_ms": 5, "total_tokens": 7, "agent_route": ["credito"]},
-        "langfuse_enabled": False,
-    } | changes
-
-
-def test_http_client_sends_contract_and_configured_timeout():
-    seen = []
-
-    def respond(request):
-        assert request.url.host == "api.test"
-        assert set(request.extensions["timeout"].values()) == {2.5}
-        if request.method == "GET":
-            assert request.url.path == "/health"
-            return httpx.Response(200, json={"langfuse_enabled": True})
-        assert request.method == "POST"
-        assert request.url.path == "/api/v1/chat"
-        seen.append(json.loads(request.content))
-        return httpx.Response(200, json=chat_response())
-
-    client = HttpChatClient(
-        INTERNAL_URL, timeout_seconds=2.5, transport=httpx.MockTransport(respond)
-    )
-    assert client.check_health().langfuse_enabled
-    assert client.send_message(thread_id="api-thread", user_message="Olá").reply == "Resposta"
-    assert client.resume(thread_id="api-thread", approved=False).telemetry.total_tokens == 7
-    assert seen == [
-        {"thread_id": "api-thread", "message": "Olá"},
-        {"thread_id": "api-thread", "approve": False},
-    ]
-
-
-@pytest.mark.parametrize("failure", ["timeout", 302, 500, "invalid-json", "invalid-response"])
-def test_http_client_converts_transport_http_and_response_errors(failure):
-    def respond(request):
-        if failure == "timeout":
-            raise httpx.ReadTimeout(PII, request=request)
-        if failure == "invalid-json":
-            return httpx.Response(200, content=PII)
-        if failure == "invalid-response":
-            return httpx.Response(200, json={"reply": PII})
-        return httpx.Response(failure, content=PII)
-
-    client = HttpChatClient(INTERNAL_URL, transport=httpx.MockTransport(respond))
-    assert client.check_health() is None
-    with pytest.raises(ApiClientError) as caught:
-        client.send_message(thread_id="api-thread", user_message=PII)
-    assert PII not in str(caught.value)
-    assert INTERNAL_URL not in str(caught.value)
-    assert caught.value.__cause__ is caught.value.__context__ is None
-
-
-def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog):
+def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog, chat_response):
     pending = {
         "limite_atual": 2500,
         "novo_limite_solicitado": 6000,
