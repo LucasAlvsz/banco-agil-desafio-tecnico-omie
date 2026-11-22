@@ -32,7 +32,9 @@ from banco_agil.agents.prompts import (
     build_interview_prompt,
     build_triage_prompt,
 )
+from banco_agil.agents.state import AGENT_NODES as AGENT_NODES
 from banco_agil.agents.state import AgentName, ConversationState, has_authenticated_client
+from banco_agil.agents.state import LimitIncreaseConfirmation as LimitIncreaseConfirmation
 from banco_agil.agents.tools import (
     build_credit_tools,
     build_exchange_tools,
@@ -53,7 +55,6 @@ ERROR_REPLY = "Não foi possível responder agora. Por favor, tente novamente em
 PENDING_REPLY = "Confirme ou cancele o pedido de aumento para continuar."
 NO_CONFIRMATION_REPLY = "Não há pedido de aumento aguardando confirmação."
 DEFAULT_RECURSION_LIMIT = 16
-AGENT_NODES = ("triagem", "credito", "entrevista", "cambio")
 HANDOFF_TOOLS = {
     "calcular_e_atualizar_score",
     "redirecionar_para_credito",
@@ -65,14 +66,6 @@ HANDOFF_TOOLS = {
 type ConversationGraph = CompiledStateGraph[
     ConversationState, None, ConversationState, ConversationState
 ]
-
-
-class LimitIncreaseConfirmation(BaseModel):
-    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
-
-    limite_atual: float
-    novo_limite_solicitado: float
-    message: str
 
 
 class TurnResult(BaseModel):
