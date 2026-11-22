@@ -13,6 +13,7 @@ from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import LangfuseObservability
 from banco_agil.runtime import ConversationRuntime
+from banco_agil.ui.client import LocalChatClient
 
 APP = "from banco_agil.ui.app import main\nmain()"
 
@@ -101,12 +102,12 @@ def test_ui_chat_closure_and_new_conversation(runtime_factory, scripted_model):
     assert app.chat_message[-1].markdown[0].value == (
         "Ana Souza, como posso ajudar com seu crédito?"
     )
-    state = app.session_state.runtime.get_state(first_thread)
-    assert state["authenticated"]
-    assert state["active_agent"] == "credito"
     sidebar = "\n".join(item.value for item in app.sidebar.text)
     assert app.sidebar.subheader[0].value == "Telemetria do turno"
-    assert app.sidebar.caption[0].value == "Local (Langfuse desativado)"
+    assert [item.value for item in app.sidebar.caption] == [
+        "Local (Langfuse desativado)",
+        "Direto (em memória)",
+    ]
     assert "Agente ativo: credito" in sidebar
     assert "Rota: triagem → credito" in sidebar
     assert "Latência:" in sidebar and " ms" in sidebar
@@ -139,7 +140,7 @@ def test_ui_initialization_errors_are_friendly(monkeypatch, caplog, failure):
         raise RuntimeError("sensitive-provider-detail")
 
     target = (
-        "banco_agil.ui.app.Settings"
+        "banco_agil.ui.client.Settings"
         if failure == "settings"
         else "banco_agil.runtime.ConversationRuntime.from_settings"
     )
@@ -153,6 +154,12 @@ def test_ui_initialization_errors_are_friendly(monkeypatch, caplog, failure):
     assert record.getMessage() == "Falha na inicialização do atendimento (RuntimeError)"
     assert record.exc_info is None
     assert "sensitive-provider-detail" not in caplog.text
+
+    thread_id = app.session_state.thread_id
+    app.sidebar.button[0].click().run()
+    assert not app.exception
+    assert app.error
+    assert app.session_state.thread_id != thread_id
 
 
 def test_ui_guardrail_reply_keeps_the_chat_open(runtime_factory, scripted_model):
@@ -277,32 +284,40 @@ def test_ui_limit_confirmation(
         assert requests.read_bytes() == original
 
 
-def test_ui_displays_langfuse_status_and_flushes_on_new_conversation(
-    monkeypatch, runtime_factory, scripted_model
-):
+def test_ui_new_conversation_reuses_client_and_flushes_langfuse(monkeypatch, scripted_model):
     model = scripted_model(
         responses=[
             AIMessage(
-                content="Olá!",
+                content=reply,
                 usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
                 response_metadata={"model_name": "unknown-ui-model"},
-            ),
+            )
+            for reply in ("Olá!", "Como posso ajudar?")
         ]
     )
-    client = Mock()
-    observability = LangfuseObservability(client, BaseCallbackHandler)
-    monkeypatch.setattr(runtime_module, "create_langfuse_observability", lambda _: observability)
-    runtime_factory(model)
+    langfuse = Mock()
+    observer = LangfuseObservability(langfuse, BaseCallbackHandler)
+    monkeypatch.setattr(runtime_module, "create_langfuse_observability", lambda _: observer)
+    runtime = ConversationRuntime.from_settings(model=model)
+    client = LocalChatClient(runtime)
+    factory = Mock(return_value=client)
+    monkeypatch.setattr("banco_agil.ui.app.create_chat_client", factory)
 
     app = AppTest.from_string(APP).run()
-    app.chat_input[0].set_value("Oi").run()
+    for count in (1, 2):
+        thread_id = app.session_state.thread_id
+        app.chat_input[0].set_value("Oi").run()
 
-    assert not app.exception
-    assert app.sidebar.caption[0].value == "Langfuse ativo"
-    assert "Custo estimado: N/D" in [item.value for item in app.sidebar.text]
-    client.flush.assert_not_called()
-    previous = app.session_state.runtime
-    app.sidebar.button[0].click().run()
-    assert not app.exception
-    assert app.session_state.runtime is not previous
-    client.flush.assert_called_once_with()
+        assert not app.exception
+        assert app.sidebar.caption[0].value == "Langfuse ativo"
+        assert "Custo estimado: N/D" in [item.value for item in app.sidebar.text]
+        assert runtime.get_state(thread_id)
+        assert langfuse.flush.call_count == count - 1
+
+        app.sidebar.button[0].click().run()
+        assert not app.exception
+        assert app.session_state.thread_id != thread_id
+        assert app.session_state.client is client
+        assert runtime.get_state(thread_id) == {}
+        assert langfuse.flush.call_count == count
+    factory.assert_called_once_with()

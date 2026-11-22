@@ -89,3 +89,16 @@ promessa com o estado local do Streamlit.
 A suíte determinística não comprova disponibilidade, credenciais nem compatibilidade
 real de tool calling na Groq. Essa verificação requer uma chave local válida e não
 deve ser adicionada ao pytest.
+
+## Atualização (F13)
+
+**Data** 2026-11-22
+
+A UI Streamlit usa a interface `ChatClient` para conduzir o Atendimento por meio
+dos adaptadores `HttpChatClient` e `LocalChatClient`.
+
+No modo direto, **Nova conversa** reutiliza o `LocalChatClient` e o
+`ConversationRuntime` da sessão Streamlit, com o mesmo grafo, LLM, MCP e Langfuse.
+O runtime remove os checkpoints da thread anterior do `InMemorySaver` com
+`delete_thread(thread_id)` para liberar memória e chama `flush()` na observabilidade
+que ele possui para encaminhar os traces do Atendimento anterior.

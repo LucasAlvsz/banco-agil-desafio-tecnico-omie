@@ -9,7 +9,7 @@ from banco_agil.infrastructure.observability import LangfuseObservability, TurnO
 from banco_agil.runtime import ConversationRuntime
 
 
-def test_runtime_composes_default_dependencies_and_flushes_once(
+def test_runtime_composes_dependencies_and_flushes_on_reset_and_close(
     monkeypatch, scripted_model, data_dir
 ):
     tool_calls = [
@@ -25,6 +25,7 @@ def test_runtime_composes_default_dependencies_and_flushes_once(
         responses=[
             *(AIMessage(content="", tool_calls=[call]) for call in tool_calls),
             AIMessage(content="Pedido cancelado."),
+            AIMessage(content="Olá!"),
         ]
     )
     settings = Settings(data_dir=data_dir, llm_model="openai/gpt-4o-mini")
@@ -49,8 +50,18 @@ def test_runtime_composes_default_dependencies_and_flushes_once(
         assert resumed.pending_confirmation is None
         assert handler_factory.call_count == 2
         client.flush.assert_not_called()
+        assert runtime.run_turn(thread_id="other", user_message="Olá.").reply
+        runtime.reset_thread("thread")
+        client.flush.assert_called_once_with()
+        runtime.reset_thread("thread")
+        assert runtime.get_state("thread") == {}
+        assert runtime.get_state("other")
+        assert client.flush.call_count == 2
+        runtime.reset_thread("missing-thread")
+        assert runtime.get_state("missing-thread") == {}
+        assert client.flush.call_count == 3
     runtime.close()
-    client.flush.assert_called_once_with()
+    assert client.flush.call_count == 4
     model_factory.assert_called_once_with(settings)
 
 
@@ -65,5 +76,7 @@ def test_runtime_leaves_injected_observability_open(monkeypatch, scripted_model,
         observability=observer,
     ) as runtime:
         assert runtime.run_turn(thread_id="thread", user_message="Oi").reply == "Olá!"
+        runtime.reset_thread("thread")
+        assert runtime.get_state("thread") == {}
     create.assert_not_called()
     client.flush.assert_not_called()

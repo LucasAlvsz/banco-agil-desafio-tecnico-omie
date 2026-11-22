@@ -4,18 +4,12 @@ from uuid import uuid4
 
 import streamlit as st
 
-from banco_agil.agents.graph import (
-    ERROR_REPLY,
-    LimitIncreaseConfirmation,
-    TurnResult,
-)
+from banco_agil.agents.graph import ERROR_REPLY, LimitIncreaseConfirmation
 from banco_agil.agents.state import AgentName
 from banco_agil.api.schemas import ChatResponse
-from banco_agil.config import Settings
 from banco_agil.infrastructure.observability import TurnTelemetry
 from banco_agil.infrastructure.privacy import configure_logging
-from banco_agil.runtime import ConversationRuntime
-from banco_agil.ui.client import ApiClientError, HttpChatClient
+from banco_agil.ui.client import ChatClient, ChatClientError, create_chat_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +19,8 @@ def _format_limit(amount: float) -> str:
     return f"R$ {whole.replace(',', '.')},{fraction.ljust(2, '0')}"
 
 
-def _record_reply(result: TurnResult) -> None:
-    if isinstance(result, ChatResponse):
-        st.session_state.thread_id = result.thread_id
-        st.session_state.langfuse_enabled = result.langfuse_enabled
+def _record_reply(result: ChatResponse) -> None:
+    st.session_state.thread_id = result.thread_id
     st.session_state.history.append({"role": "assistant", "content": result.reply})
     st.session_state.pending_confirmation = result.pending_confirmation
     st.session_state.conversation_ended = result.conversation_ended
@@ -39,27 +31,16 @@ def _record_reply(result: TurnResult) -> None:
 
 def _submit_turn(*, user_message: str | None = None, approved: bool | None = None) -> None:
     thread_id: str = st.session_state.thread_id
-    http_client: HttpChatClient | None = st.session_state.get("http_client")
+    client: ChatClient = st.session_state.client
     try:
         with st.spinner("Aguarde..."):
-            result: TurnResult
-            if http_client is not None:
-                if user_message is not None:
-                    result = http_client.send_message(
-                        thread_id=thread_id, user_message=user_message
-                    )
-                else:
-                    assert approved is not None
-                    result = http_client.resume(thread_id=thread_id, approved=approved)
+            if user_message is not None:
+                result = client.send_message(thread_id=thread_id, user_message=user_message)
             else:
-                runtime: ConversationRuntime = st.session_state.runtime
-                if user_message is not None:
-                    result = runtime.run_turn(thread_id=thread_id, user_message=user_message)
-                else:
-                    assert approved is not None
-                    result = runtime.resume_turn(thread_id=thread_id, approved=approved)
-    except ApiClientError as exc:
-        logger.error("Falha na comunicação com a API (%s)", type(exc).__name__)
+                assert approved is not None
+                result = client.resume(thread_id=thread_id, approved=approved)
+    except ChatClientError as exc:
+        logger.error("Falha ao enviar turno (%s)", type(exc).__name__)
         st.session_state.history.append({"role": "assistant", "content": ERROR_REPLY})
         st.rerun()
         return
@@ -72,12 +53,12 @@ def _show_telemetry(
     active_agent: AgentName,
     *,
     langfuse_enabled: bool,
-    http_mode: bool,
+    mode_label: str,
 ) -> None:
     with st.sidebar:
         st.subheader("Telemetria do turno")
         st.caption("Langfuse ativo" if langfuse_enabled else "Local (Langfuse desativado)")
-        st.caption("API HTTP" if http_mode else "Direto (em memória)")
+        st.caption(mode_label)
         st.text(f"Agente ativo: {active_agent}")
         if telemetry is not None:
             st.text(f"Rota: {' → '.join(telemetry.agent_route)}")
@@ -96,33 +77,20 @@ def main() -> None:
     st.title("Banco Ágil")
 
     new_conversation = st.sidebar.button("Nova conversa")
+    if new_conversation and "client" in st.session_state and "thread_id" in st.session_state:
+        client: ChatClient = st.session_state.client
+        client.reset_conversation(st.session_state.thread_id)
     if new_conversation or "thread_id" not in st.session_state:
-        previous: ConversationRuntime | None = st.session_state.get("runtime")
-        if previous is not None:
-            previous.close()
-            del st.session_state.runtime
         st.session_state.thread_id = str(uuid4())
         st.session_state.history = []
         st.session_state.conversation_ended = False
         st.session_state.pending_confirmation = None
         st.session_state.last_telemetry = None
         st.session_state.active_agent = "triagem"
-        st.session_state.pop("http_client", None)
 
     try:
-        if "runtime" not in st.session_state and "http_client" not in st.session_state:
-            settings = Settings()
-            if settings.api_base_url is not None:
-                http_client = HttpChatClient(
-                    settings.api_base_url, timeout_seconds=settings.api_timeout_seconds
-                )
-                health = http_client.check_health()
-                st.session_state.langfuse_enabled = health is not None and health.langfuse_enabled
-                st.session_state.http_client = http_client
-            else:
-                runtime = ConversationRuntime.from_settings(settings)
-                st.session_state.runtime = runtime
-                st.session_state.langfuse_enabled = runtime.langfuse_enabled
+        if "client" not in st.session_state:
+            st.session_state.client = create_chat_client()
     except Exception as exc:
         logger.error("Falha na inicialização do atendimento (%s)", type(exc).__name__)
         st.error(
@@ -130,11 +98,12 @@ def main() -> None:
         )
         st.stop()
 
+    client = st.session_state.client
     _show_telemetry(
         st.session_state.last_telemetry,
         st.session_state.active_agent,
-        langfuse_enabled=st.session_state.langfuse_enabled,
-        http_mode="http_client" in st.session_state,
+        langfuse_enabled=client.langfuse_enabled,
+        mode_label=client.mode_label,
     )
 
     for message in st.session_state.history:

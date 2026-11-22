@@ -121,6 +121,13 @@ class ConversationRuntime:
         snapshot = self._graph.get_state({"configurable": {"thread_id": thread_id}})
         return cast(ConversationState, snapshot.values)
 
+    def reset_thread(self, thread_id: str) -> None:
+        checkpointer = self._graph.checkpointer
+        if isinstance(checkpointer, BaseCheckpointSaver):
+            checkpointer.delete_thread(thread_id)
+        if self._owns_observability:
+            self._observability.flush()
+
     def close(self) -> None:
         if self._owns_observability:
             self._owns_observability = False
