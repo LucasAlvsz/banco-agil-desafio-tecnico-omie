@@ -236,7 +236,10 @@ def test_pending_turn_is_preserved_until_canceled(
     assert resume_turn(graph, thread_id=THREAD, approved=True).reply == NO_CONFIRMATION_REPLY
 
 
-@pytest.mark.parametrize("decision", ["sim", {"approved": 1}, {"approved": "true"}, {"ok": True}])
+@pytest.mark.parametrize(
+    "decision",
+    ["sim", {"approved": 1}, {"approved": "true"}, {"ok": True}, {"approved": True, "extra": True}],
+)
 def test_resume_requires_a_boolean_true(credit_session, credit_files, decision):
     graph, _ = credit_session(increase(6000), AIMessage(content="Pedido cancelado."))
     original = csv_bytes(credit_files)

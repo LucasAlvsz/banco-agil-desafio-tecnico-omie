@@ -2,8 +2,10 @@ import logging
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.prebuilt import ToolNode
 
+from banco_agil.agents import tools as agent_tools
 from banco_agil.agents.graph import ENDED_REPLY, build_graph, run_turn
 from banco_agil.domain.errors import PersistenceError
 
@@ -52,6 +54,27 @@ def tool_messages(state):
 def assert_no_personal_data(text):
     for value in (CPF, "12345678901", BIRTH_DATE, "1990-05-14"):
         assert value not in text
+
+
+def test_handoff_tools_are_marked_without_exposing_metadata(credit_service):
+    registered = [
+        *agent_tools.build_triage_tools(credit_service),
+        *agent_tools.build_credit_tools(credit_service),
+        *agent_tools.build_interview_tools(credit_service),
+        agent_tools.voltar_para_triagem,
+        agent_tools.encerrar_atendimento,
+    ]
+    assert {tool.name for tool in registered if agent_tools.is_handoff_tool(tool)} == {
+        "calcular_e_atualizar_score",
+        "redirecionar_para_credito",
+        "redirecionar_para_entrevista",
+        "redirecionar_para_cambio",
+        "voltar_para_triagem",
+    }
+    for tool in registered:
+        schema = convert_to_openai_tool(tool)
+        assert set(schema) == {"type", "function"}
+        assert "extras" not in schema["function"]
 
 
 def test_physical_tool_isolation_and_schema(scripted_model, credit_service):
