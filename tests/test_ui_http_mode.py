@@ -152,8 +152,8 @@ def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog):
     monkeypatch.setenv("API_BASE_URL", INTERNAL_URL + "/")
     monkeypatch.setenv("API_TIMEOUT_SECONDS", "3.5")
     monkeypatch.setattr("banco_agil.ui.app.HttpChatClient", client_factory)
-    graph = Mock(side_effect=AssertionError("O grafo deve rodar na API"))
-    monkeypatch.setattr("banco_agil.ui.app.build_graph", graph)
+    runtime_factory = Mock(side_effect=AssertionError("O runtime deve rodar na API"))
+    monkeypatch.setattr("banco_agil.runtime.ConversationRuntime.from_settings", runtime_factory)
 
     app = AppTest.from_string(APP).run()
     initial_thread = app.session_state.thread_id
@@ -206,7 +206,7 @@ def test_ui_http_turn_and_hitl_retry(monkeypatch, isolated_logging, caplog):
     assert app.session_state.thread_id != "api-thread"
     assert not app.chat_message
     assert not app.chat_input[0].disabled
-    graph.assert_not_called()
+    runtime_factory.assert_not_called()
     errors = [record for record in caplog.records if record.name == "banco_agil.ui.app"]
     assert [record.getMessage() for record in errors] == [
         "Falha na comunicação com a API (ApiClientError)"
