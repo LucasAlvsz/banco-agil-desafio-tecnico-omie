@@ -1,16 +1,16 @@
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from math import isfinite
-from threading import Lock
-from typing import TYPE_CHECKING, Any, cast, get_args
+from time import perf_counter
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 from pydantic import BaseModel, ConfigDict, Field
 
-from banco_agil.agents.state import AgentName
 from banco_agil.config import Settings
 from banco_agil.infrastructure.privacy import mask_pii, mask_pii_data
 
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from langfuse.types import MaskOtelSpansParams, MaskOtelSpansResult
 
 logger = logging.getLogger(__name__)
-AGENT_NAMES = get_args(AgentName)
 
 
 class TurnTelemetry(BaseModel):
@@ -31,7 +30,7 @@ class TurnTelemetry(BaseModel):
     total_tokens: int = Field(default=0, ge=0)
     estimated_cost_usd: float | None = Field(default=None, ge=0)
     model_name: str | None = None
-    agent_route: tuple[AgentName, ...] = ()
+    agent_route: tuple[str, ...] = ()
     tools_called: tuple[str, ...] = ()
     guardrail_blocked: bool = False
 
@@ -61,9 +60,12 @@ def _token_count(value: object, default: int = 0) -> int:
 
 
 class TurnTelemetryCallback(BaseCallbackHandler):
-    def __init__(self, default_model_name: str | None = None) -> None:
+    def __init__(
+        self, tracked_nodes: Collection[str], default_model_name: str | None = None
+    ) -> None:
+        self._tracked_nodes = tracked_nodes
         self._model_name = default_model_name
-        self.agent_route: list[AgentName] = []
+        self.agent_route: list[str] = []
         self.tools_called: list[str] = []
         self.input_tokens = self.output_tokens = self.total_tokens = 0
 
@@ -76,8 +78,12 @@ class TurnTelemetryCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         node = (metadata or {}).get("langgraph_node")
-        if node in AGENT_NAMES and (not self.agent_route or self.agent_route[-1] != node):
-            self.agent_route.append(cast(AgentName, node))
+        if (
+            isinstance(node, str)
+            and node in self._tracked_nodes
+            and (not self.agent_route or self.agent_route[-1] != node)
+        ):
+            self.agent_route.append(node)
 
     def on_tool_start(self, serialized: dict[str, Any], input_str: str, **kwargs: Any) -> None:
         name = kwargs.get("name") or serialized.get("name")
@@ -110,7 +116,9 @@ class TurnTelemetryCallback(BaseCallbackHandler):
                 usage.get("total_tokens"), input_tokens + output_tokens
             )
 
-    def build(self, latency_ms: float, *, guardrail_blocked: bool = False) -> TurnTelemetry:
+    def build(
+        self, latency_ms: float, *, fallback_node: str, guardrail_blocked: bool
+    ) -> TurnTelemetry:
         return TurnTelemetry(
             latency_ms=latency_ms,
             input_tokens=self.input_tokens,
@@ -120,7 +128,7 @@ class TurnTelemetryCallback(BaseCallbackHandler):
                 self._model_name, self.input_tokens, self.output_tokens
             ),
             model_name=mask_pii(self._model_name) if self._model_name else None,
-            agent_route=tuple(self.agent_route),
+            agent_route=tuple(self.agent_route) or (fallback_node,),
             tools_called=tuple(self.tools_called),
             guardrail_blocked=guardrail_blocked,
         )
@@ -153,25 +161,12 @@ def langfuse_mask_otel_spans(*, params: "MaskOtelSpansParams") -> "MaskOtelSpans
 
 class LangfuseObservability:
     def __init__(
-        self,
-        client: "Langfuse",
-        handler: BaseCallbackHandler,
-        *,
-        handler_factory: Callable[[], BaseCallbackHandler] | None = None,
+        self, client: "Langfuse", handler_factory: Callable[[], BaseCallbackHandler]
     ) -> None:
         self._client = client
-        self._handler: BaseCallbackHandler | None = handler
         self._handler_factory = handler_factory
-        self._handler_lock = Lock()
 
     def create_handler(self) -> BaseCallbackHandler:
-        with self._handler_lock:
-            if self._handler is not None:
-                handler = self._handler
-                if self._handler_factory is not None:
-                    self._handler = None
-                return handler
-        assert self._handler_factory is not None
         return self._handler_factory()
 
     def flush(self) -> None:
@@ -207,7 +202,53 @@ def create_langfuse_observability(settings: Settings) -> LangfuseObservability |
             mask_otel_spans=langfuse_mask_otel_spans,
         )
         handler_factory = partial(CallbackHandler, public_key=public_key)
-        return LangfuseObservability(client, handler_factory(), handler_factory=handler_factory)
+        handler_factory()
+        return LangfuseObservability(client, handler_factory)
     except Exception as exc:
         logger.warning("Langfuse indisponível (%s)", type(exc).__name__)
         return None
+
+
+@dataclass(frozen=True)
+class TurnScope:
+    callbacks: tuple[BaseCallbackHandler, ...]
+    metadata: Mapping[str, Any]
+    _telemetry: TurnTelemetryCallback
+    _started: float
+
+    def finish(self, *, fallback_node: str, guardrail_blocked: bool = False) -> TurnTelemetry:
+        return self._telemetry.build(
+            (perf_counter() - self._started) * 1000,
+            fallback_node=fallback_node,
+            guardrail_blocked=guardrail_blocked,
+        )
+
+
+class TurnObservability:
+    def __init__(self, langfuse: LangfuseObservability | None = None) -> None:
+        self._langfuse = langfuse
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        return self._langfuse is not None
+
+    def start_turn(
+        self,
+        *,
+        thread_id: str,
+        tracked_nodes: Collection[str],
+        default_model_name: str | None = None,
+        extra_callbacks: Sequence[BaseCallbackHandler] = (),
+    ) -> TurnScope:
+        started = perf_counter()
+        telemetry = TurnTelemetryCallback(tracked_nodes, default_model_name)
+        callbacks: tuple[BaseCallbackHandler, ...] = (telemetry,)
+        metadata: dict[str, Any] = {}
+        if self._langfuse is not None:
+            callbacks += (self._langfuse.create_handler(),)
+            metadata = {"langfuse_session_id": thread_id, "langfuse_tags": ["banco-agil"]}
+        return TurnScope((*callbacks, *extra_callbacks), metadata, telemetry, started)
+
+    def flush(self) -> None:
+        if self._langfuse is not None:
+            self._langfuse.flush()

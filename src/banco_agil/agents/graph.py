@@ -2,7 +2,6 @@ import logging
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from functools import partial
-from time import perf_counter
 from typing import Any, Literal, cast
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -45,7 +44,7 @@ from banco_agil.agents.tools import (
 from banco_agil.domain.repositories import ExchangeRateProvider
 from banco_agil.domain.services import CreditService
 from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
-from banco_agil.infrastructure.observability import TurnTelemetry, TurnTelemetryCallback
+from banco_agil.infrastructure.observability import TurnObservability, TurnTelemetry
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +189,11 @@ def run_turn(
     recursion_limit: int = DEFAULT_RECURSION_LIMIT,
     callbacks: Sequence[BaseCallbackHandler] = (),
     model_name: str | None = None,
+    observability: TurnObservability | None = None,
 ) -> TurnResult:
-    return _execute_turn(graph, thread_id, user_message, recursion_limit, callbacks, model_name)
+    return _execute_turn(
+        graph, thread_id, user_message, recursion_limit, callbacks, model_name, observability
+    )
 
 
 def resume_turn(
@@ -202,6 +204,7 @@ def resume_turn(
     recursion_limit: int = DEFAULT_RECURSION_LIMIT,
     callbacks: Sequence[BaseCallbackHandler] = (),
     model_name: str | None = None,
+    observability: TurnObservability | None = None,
 ) -> TurnResult:
     return _execute_turn(
         graph,
@@ -210,6 +213,7 @@ def resume_turn(
         recursion_limit,
         callbacks,
         model_name,
+        observability,
     )
 
 
@@ -228,12 +232,17 @@ def _execute_turn(
     recursion_limit: int,
     callbacks: Sequence[BaseCallbackHandler],
     model_name: str | None,
+    observability: TurnObservability | None,
 ) -> TurnResult:
-    started = perf_counter()
-    telemetry = TurnTelemetryCallback(default_model_name=model_name)
-    guardrail_blocked = False
     if recursion_limit < 2:
         raise ValueError("recursion_limit deve ser maior ou igual a 2")
+    scope = (observability or TurnObservability()).start_turn(
+        thread_id=thread_id,
+        tracked_nodes=AGENT_NODES,
+        default_model_name=model_name,
+        extra_callbacks=callbacks,
+    )
+    guardrail_blocked = False
     config: RunnableConfig = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": recursion_limit,
@@ -266,14 +275,10 @@ def _execute_turn(
                 if isinstance(turn_input, str)
                 else turn_input
             )
-            graph.invoke(
-                invocation,
-                config
-                | {
-                    "callbacks": [telemetry, *callbacks],
-                    "metadata": {"langfuse_session_id": thread_id, "langfuse_tags": ["banco-agil"]},
-                },
-            )
+            invoke_config: RunnableConfig = {**config, "callbacks": list(scope.callbacks)}
+            if scope.metadata:
+                invoke_config["metadata"] = dict(scope.metadata)
+            graph.invoke(invocation, invoke_config)
             snapshot = graph.get_state(config)
             state = cast(ConversationState, snapshot.values)
             confirmation = _pending_confirmation(snapshot)
@@ -309,15 +314,11 @@ def _execute_turn(
 
     reply = sanitize_reply(reply, state) if reply else ERROR_REPLY
     active_agent = _active_agent(state)
-    if not telemetry.agent_route:
-        telemetry.agent_route.append(active_agent)
     return TurnResult(
         reply=reply,
         conversation_ended=state.get("conversation_ended", False),
         active_agent=active_agent,
         authenticated=has_authenticated_client(state),
         pending_confirmation=confirmation if not state.get("conversation_ended") else None,
-        telemetry=telemetry.build(
-            (perf_counter() - started) * 1000, guardrail_blocked=guardrail_blocked
-        ),
+        telemetry=scope.finish(fallback_node=active_agent, guardrail_blocked=guardrail_blocked),
     )
