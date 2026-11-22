@@ -4,7 +4,10 @@
 *(vazio)*
 
 ## To Do
-*(vazio)*
+- [ ] **F13 — Seam `ChatClient` na UI Streamlit:** unificar os modos HTTP e direto atrás do seam `ChatClient` (`HttpChatClient` + `LocalChatClient` envolvendo `ConversationRuntime`) e avaliar atualização do ADR 002 sobre *Nova conversa*.
+- [ ] **F14 — Contratos de Agentes e Seam de Guardrails:** contrato HITL tipado, `evaluate_user_input` retornando texto limpo, declarações únicas de `AGENT_NODES`/`HANDOFF_TOOLS`, deduplicação do gate de autenticação em `tools.py` e remoção do import `McpExchangeRateProvider` de `agents/graph.py`.
+- [ ] **F15 — Colocalização do Protocolo MCP de Câmbio:** colocalizar cliente e servidor sob `src/banco_agil/mcp/` atrás de `ExchangeRateProvider`, mantendo constantes/codec privados e preservando o ADR 009.
+- [ ] **Spike — Helpers de Privacidade/CSV em `evals/runner.py` (Candidato 6):** avaliar consolidação ou simplificação dos helpers auxiliares de privacidade e leitura CSV no runner de evals.
 
 ## Done
 - [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
@@ -20,3 +23,4 @@
 - [x] **F09 — FastAPI & Docker:** API REST assíncrona (`/health`, `/api/v1/chat`, `lifespan`, `asyncio.to_thread`, lock por `thread_id`, `CreditService._write_lock`, `StrictBool` HITL, handlers 422/500 sem PII), Streamlit híbrido (`API_BASE_URL` / `HttpChatClient`), `Dockerfile` multi-stage (`uv:0.10`, não-root) + `docker-compose.yml`, 406 testes (99% cobertura) e ADR 008.
 - [x] **F10 — MCP (Câmbio):** servidor MCP stateless `MCPServer` (`mcp` v2.3.0, `stdio`/`streamable-http` com `TransportSecuritySettings`), cliente `McpExchangeRateProvider` via `mcp.client.Client` (`inmemory`/`stdio`/`streamable_http`), isolamento físico sem `./data` no serviço `mcp-exchange` do Compose, 438 testes (99% cobertura) e ADR 009.
 - [x] **F11 — README Final & Guia de Escala:** `README.md` consolidado com visão geral, 2 diagramas Mermaid, funcionalidades, problemas técnicos e soluções, tabela de ADRs `001`–`009`, tutorial de execução/testes (local, API, MCP e Docker Compose) e guia de evolução para produção na AWS (20/20 links válidos).
+- [x] **F12 — Runtime do Atendimento e Seam de Observabilidade:** `TurnObservability`/`TurnScope` sem ciclo `observability → agents`, `LangfuseObservability` sem `_handler`/`Lock`, `ConversationRuntime` (`src/banco_agil/runtime.py`) como composition root síncrono com ownership de `flush()`, migração de API (`ApiRuntimeState`), UI (fix `flush()` em *Nova conversa*) e Evals (fix handlers independentes por turno/cenário), `GLOSSARY.md`, 443 testes (99% cobertura) e 12/12 evals.

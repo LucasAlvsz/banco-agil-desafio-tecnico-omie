@@ -10,6 +10,7 @@ banco-agil/
 ├── evals/              # Dataset declarativo de cenários de avaliação (scenarios.json)
 ├── src/banco_agil/     # Código da aplicação (Python 3.12, mypy --strict)
 │   ├── config.py       # Settings tipadas (pydantic-settings, SecretStr)
+│   ├── runtime.py      # ConversationRuntime (composition root síncrono, despacho de turnos e observabilidade)
 │   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
 │   ├── infrastructure/ # Repositórios CSV, câmbio HTTP/MCP, factory LiteLLM, privacidade LGPD e observabilidade
 │   ├── agents/         # Estado tipado, guardrails, ferramentas LangGraph e grafo conversacional
@@ -25,6 +26,7 @@ banco-agil/
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
 ├── Dockerfile          # Imagem multi-stage (uv + Python 3.12 slim, usuário não-root, sem CSVs)
 ├── docker-compose.yml  # Orquestração local dos serviços mcp-exchange, api e ui
+├── GLOSSARY.md         # Glossário de linguagem de domínio
 ├── Makefile            # Comandos padronizados de setup, MCP, API, UI, evals e verificação
 └── pyproject.toml      # Configuração do pacote, ruff, mypy e pytest
 ```
