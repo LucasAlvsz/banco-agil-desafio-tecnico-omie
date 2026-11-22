@@ -28,18 +28,13 @@ from banco_agil.config import Settings
 from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.models import Client, LimitIncreaseRequest
 from banco_agil.domain.rules import normalize_birth_date, normalize_cpf
-from banco_agil.domain.services import CreditService
 from banco_agil.evals.models import (
     EvalLimitRequest,
     EvalReport,
     EvalScenario,
     ScenarioEvalResult,
 )
-from banco_agil.infrastructure.csv_repositories import (
-    CsvClientRepository,
-    CsvLimitRequestRepository,
-    CsvScoreLimitRepository,
-)
+from banco_agil.infrastructure.csv_repositories import CsvClientRepository
 from banco_agil.infrastructure.exchange_client import (
     AWESOME_URL,
     FRANKFURTER_URL,
@@ -156,15 +151,12 @@ def _run_scenario(
     observability: TurnObservability,
 ) -> ScenarioEvalResult:
     work_dir = settings.data_dir
-    clients_path, scores_path, requests_path = (work_dir / name for name in SEEDS)
+    clients_path, _, requests_path = (work_dir / name for name in SEEDS)
     clients = CsvClientRepository(clients_path)
     with clients_path.open(encoding="utf-8", newline="") as file:
         seeds = [Client.model_validate(row) for row in csv.DictReader(file)]
     cpfs = {client.cpf for client in seeds}
     dates = {client.data_nascimento for client in seeds}
-    service = CreditService(
-        clients, CsvScoreLimitRepository(scores_path), CsvLimitRequestRepository(requests_path)
-    )
     scripted = EvalScriptedChatModel() if live_model is None else None
     model = scripted if scripted is not None else live_model
     assert model is not None
@@ -177,7 +169,6 @@ def _run_scenario(
     with ConversationRuntime.from_settings(
         settings,
         model=model,
-        credit_service=service,
         exchange_provider=_exchange_provider(scenario, settings.exchange_timeout_seconds),
         observability=observability,
     ) as runtime:
@@ -254,7 +245,7 @@ def _run_scenario(
                 checks["ferramentas chamadas"] = telemetry.tools_called == expect.tools
             if expect.client_limit is not None or expect.client_score is not None:
                 cpf = state.get("client_cpf")
-                client = service.get_client(cpf) if cpf else None
+                client = clients.get(cpf) if cpf else None
                 checks["limite do cliente"] = expect.client_limit is None or (
                     client is not None and client.limite_atual == expect.client_limit
                 )

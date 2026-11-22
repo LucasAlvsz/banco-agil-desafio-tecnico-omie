@@ -21,7 +21,7 @@ VALIDATION_LOCATIONS = {"body", *ChatRequest.model_fields}
 
 
 @dataclass
-class Runtime:
+class ApiRuntimeState:
     conversation: ConversationRuntime
     owns_runtime: bool
     thread_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
@@ -40,7 +40,7 @@ def create_app(
         conversation = (
             runtime if runtime is not None else ConversationRuntime.from_settings(settings)
         )
-        state = Runtime(conversation, owns_runtime=runtime is None)
+        state = ApiRuntimeState(conversation, owns_runtime=runtime is None)
         app.state.runtime = state
         try:
             yield
@@ -78,20 +78,20 @@ def create_app(
 
     @app.get("/health")
     async def health(request: Request) -> HealthResponse:
-        runtime = cast(Runtime, request.app.state.runtime)
-        return HealthResponse(langfuse_enabled=runtime.conversation.langfuse_enabled)
+        state = cast(ApiRuntimeState, request.app.state.runtime)
+        return HealthResponse(langfuse_enabled=state.conversation.langfuse_enabled)
 
     @app.post("/api/v1/chat")
     async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
-        runtime = cast(Runtime, request.app.state.runtime)
+        state = cast(ApiRuntimeState, request.app.state.runtime)
         thread_id = payload.thread_id if payload.thread_id is not None else str(uuid4())
-        async with runtime.creation_lock:
-            lock = runtime.thread_locks.get(thread_id)
+        async with state.creation_lock:
+            lock = state.thread_locks.get(thread_id)
             if lock is None:
-                lock = runtime.thread_locks[thread_id] = asyncio.Lock()
+                lock = state.thread_locks[thread_id] = asyncio.Lock()
 
         def execute() -> ChatResponse:
-            conversation = runtime.conversation
+            conversation = state.conversation
             if payload.message is not None:
                 turn = conversation.run_turn(thread_id=thread_id, user_message=payload.message)
             else:
@@ -104,7 +104,7 @@ def create_app(
             )
 
         def finish(worker: asyncio.Task[ChatResponse]) -> None:
-            runtime.workers.discard(worker)
+            state.workers.discard(worker)
             lock.release()
             if not worker.cancelled():
                 worker.exception()
@@ -112,7 +112,7 @@ def create_app(
         # A cancelled HTTP request cannot stop the thread. Release the lock when the work ends.
         await lock.acquire()
         worker = asyncio.create_task(asyncio.to_thread(execute))
-        runtime.workers.add(worker)
+        state.workers.add(worker)
         worker.add_done_callback(finish)
         return await asyncio.shield(worker)
 
