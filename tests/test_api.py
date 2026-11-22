@@ -33,6 +33,14 @@ def offline_runtime(scripted_model, credit_service):
     )
 
 
+def test_openapi_preserves_agent_route_enum():
+    schemas = api.create_app().openapi()["components"]["schemas"]
+    telemetry_ref = schemas["ChatResponse"]["properties"]["telemetry"]["$ref"]
+    assert telemetry_ref == "#/components/schemas/TurnTelemetry"
+    route = schemas["TurnTelemetry"]["properties"]["agent_route"]
+    assert route["items"]["enum"] == ["triagem", "credito", "entrevista", "cambio"]
+
+
 def test_import_does_not_initialize_runtime(monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("Inicialização antecipada no import da API")

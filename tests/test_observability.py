@@ -1,5 +1,8 @@
+import ast
 import builtins
+import inspect
 import sys
+from importlib.util import resolve_name
 from types import ModuleType
 from unittest.mock import Mock
 
@@ -12,6 +15,7 @@ from pydantic import SecretStr
 
 from banco_agil.agents.graph import ERROR_REPLY, build_graph, resume_turn, run_turn
 from banco_agil.config import Settings
+from banco_agil.infrastructure import observability
 from banco_agil.infrastructure.observability import (
     LangfuseObservability,
     TurnObservability,
@@ -25,6 +29,20 @@ from banco_agil.infrastructure.observability import (
 PII = "123.456.789-01 14/05/1990 gsk_exemplo_falso"
 MASKED = "[dado omitido] [dado omitido] [dado omitido]"
 THREAD = "session-f08"
+
+
+def test_observability_has_no_agent_imports():
+    module = ast.parse(inspect.getsource(observability))
+    imports = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            prefix = resolve_name("." * node.level + (node.module or ""), observability.__package__)
+            imports.extend(f"{prefix}.{alias.name}" for alias in node.names)
+    assert not any(
+        name.startswith("banco_agil.agents.") or name == "banco_agil.agents" for name in imports
+    )
 
 
 def test_cost_handles_absent_or_unknown_prices_and_valid_tokens(monkeypatch):
