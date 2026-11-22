@@ -52,11 +52,10 @@ def test_runtime_composes_dependencies_and_flushes_on_reset_and_close(
         client.flush.assert_not_called()
         assert runtime.run_turn(thread_id="other", user_message="Olá.").reply
         runtime.reset_thread("thread")
-        assert runtime.get_state("thread") == {}
-        assert runtime.get_state("other")
         client.flush.assert_called_once_with()
         runtime.reset_thread("thread")
         assert runtime.get_state("thread") == {}
+        assert runtime.get_state("other")
         assert client.flush.call_count == 2
     runtime.close()
     assert client.flush.call_count == 3

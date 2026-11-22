@@ -154,9 +154,12 @@ def test_factory_owns_local_runtime(monkeypatch, scripted_model, data_dir):
     monkeypatch.setattr(runtime_module, "create_langfuse_observability", lambda _: observer)
 
     client = create_chat_client(Settings(data_dir=data_dir))
+    assert isinstance(client, LocalChatClient)
     assert client.mode_label == "Direto (em memória)"
-    assert client.send_message(thread_id="local", user_message="Oi").reply == "Olá!"
-    client.close()
+    with client as entered:
+        assert entered is client
+        assert client.send_message(thread_id="local", user_message="Oi").reply == "Olá!"
+    langfuse.flush.assert_called_once_with()
     client.close()
     langfuse.flush.assert_called_once_with()
 
