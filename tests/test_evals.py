@@ -13,6 +13,8 @@ from banco_agil.evals import runner
 from banco_agil.evals.__main__ import main
 from banco_agil.evals.models import EvalReport, EvalScenario
 from banco_agil.evals.runner import DEFAULT_SCENARIOS_PATH, load_scenarios, run_evals
+from banco_agil.infrastructure.observability import LangfuseObservability
+from banco_agil.runtime import ConversationRuntime
 
 DATA_DIR = Path("data")
 
@@ -80,7 +82,7 @@ def test_evals_detect_route_mismatch_and_pii_then_exit_one(
 ):
     path = single_scenario(expect={"route": ["credito"]})
     monkeypatch.setattr(
-        runner,
+        ConversationRuntime,
         "run_turn",
         lambda *args, **kwargs: TurnResult(
             reply="CPF 123.456.789-01",
@@ -129,18 +131,37 @@ def test_live_evals_use_configured_model_and_flush_observability(
         script=["Este roteiro deve ser ignorado."],
         expect={"reply_contains": ["Este roteiro deve ser ignorado."]},
     )
+    [scenario] = json.loads(path.read_text())
+    scenario["turns"] *= 2
+    path.write_text(json.dumps([scenario, scenario | {"id": "second"}]))
     factory = Mock(
-        return_value=scripted_model(responses=[AIMessage(content="Não posso fazer Pix.")])
+        return_value=scripted_model(
+            responses=[AIMessage(content="Não posso fazer Pix.") for _ in range(4)]
+        )
     )
     monkeypatch.setattr("banco_agil.infrastructure.llm_factory.create_chat_model", factory)
-    observability = Mock()
-    observability.create_handler.return_value = BaseCallbackHandler()
-    monkeypatch.setattr(runner, "create_langfuse_observability", lambda settings: observability)
+    traces = []
+
+    class Capture(BaseCallbackHandler):
+        def on_chain_start(self, serialized, inputs, *, parent_run_id, metadata, **kwargs):
+            if parent_run_id is None:
+                traces.append((self, metadata["langfuse_session_id"]))
+
+    sdk = Mock()
+    handler_factory = Mock(side_effect=Capture)
+    observer = LangfuseObservability(sdk, handler_factory)
+    monkeypatch.setattr(runner, "create_langfuse_observability", Mock(return_value=observer))
     report = run_evals(mode="live", scenarios_path=path)
     factory.assert_called_once()
     assert factory.call_args.args[0].llm_model == Settings().llm_model
     assert report.pass_rate == report.route_accuracy == 1.0
-    observability.flush.assert_called_once_with()
+    assert handler_factory.call_count == 4
+    assert len({handler for handler, _ in traces}) == 4
+    first, second, third, fourth = [session for _, session in traces]
+    assert first == second
+    assert third == fourth
+    assert first != third
+    sdk.flush.assert_called_once_with()
 
 
 def test_live_flushes_if_execution_fails(monkeypatch, single_scenario, tmp_path):
