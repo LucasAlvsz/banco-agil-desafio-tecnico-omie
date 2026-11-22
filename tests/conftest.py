@@ -1,6 +1,7 @@
 import logging
 import socket
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -114,12 +115,18 @@ def credit_service(data_dir):
 
 
 @pytest.fixture
-def exchange_provider() -> ExchangeRateProvider:
+def exchange_provider() -> Iterator[ExchangeRateProvider]:
+    unexpected_quote = False
+    error = "Provedor de câmbio não esperado neste teste"
+
     class UnexpectedExchangeProvider:
         async def get_quote(self, currency: str = "USD") -> ExchangeQuote:
-            raise AssertionError("Provedor de câmbio não esperado neste teste")
+            nonlocal unexpected_quote
+            unexpected_quote = True
+            raise AssertionError(error)
 
-    return UnexpectedExchangeProvider()
+    yield UnexpectedExchangeProvider()
+    assert not unexpected_quote, error
 
 
 @pytest.fixture
