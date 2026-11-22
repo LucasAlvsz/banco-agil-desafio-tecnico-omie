@@ -13,41 +13,37 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
-from langchain_core.callbacks import BaseCallbackHandler, CallbackManagerForLLMRun
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langsmith import tracing_context
 from pydantic import Field, TypeAdapter
 
-from banco_agil.agents.graph import ERROR_REPLY, TurnResult, build_graph, resume_turn, run_turn
+from banco_agil.agents.graph import ERROR_REPLY, TurnResult
 from banco_agil.config import Settings
 from banco_agil.domain.errors import DomainValidationError
 from banco_agil.domain.models import Client, LimitIncreaseRequest
 from banco_agil.domain.rules import normalize_birth_date, normalize_cpf
-from banco_agil.domain.services import CreditService
 from banco_agil.evals.models import (
     EvalLimitRequest,
     EvalReport,
     EvalScenario,
     ScenarioEvalResult,
 )
-from banco_agil.infrastructure.csv_repositories import (
-    CsvClientRepository,
-    CsvLimitRequestRepository,
-    CsvScoreLimitRepository,
-)
+from banco_agil.infrastructure.csv_repositories import CsvClientRepository
 from banco_agil.infrastructure.exchange_client import (
     AWESOME_URL,
     FRANKFURTER_URL,
     ExchangeRateClient,
 )
 from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
-from banco_agil.infrastructure.observability import create_langfuse_observability
+from banco_agil.infrastructure.observability import TurnObservability, create_langfuse_observability
 from banco_agil.infrastructure.privacy import CPF_PATTERN, DATE_PATTERN
+from banco_agil.runtime import ConversationRuntime
 
 DEFAULT_SCENARIOS_PATH = Path("evals/scenarios.json")
 SEEDS = ("clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv")
@@ -149,129 +145,122 @@ def _aggregate_cost(costs: Sequence[float | None]) -> float | None:
 
 def _run_scenario(
     scenario: EvalScenario,
-    work_dir: Path,
+    settings: Settings,
     *,
     live_model: BaseChatModel | None,
-    callbacks: tuple[BaseCallbackHandler, ...],
-    model_name: str,
-    exchange_timeout: float,
+    observability: TurnObservability,
 ) -> ScenarioEvalResult:
-    clients_path, scores_path, requests_path = (work_dir / name for name in SEEDS)
+    work_dir = settings.data_dir
+    clients_path, _, requests_path = (work_dir / name for name in SEEDS)
     clients = CsvClientRepository(clients_path)
     with clients_path.open(encoding="utf-8", newline="") as file:
         seeds = [Client.model_validate(row) for row in csv.DictReader(file)]
     cpfs = {client.cpf for client in seeds}
     dates = {client.data_nascimento for client in seeds}
-    service = CreditService(
-        clients, CsvScoreLimitRepository(scores_path), CsvLimitRequestRepository(requests_path)
-    )
     scripted = EvalScriptedChatModel() if live_model is None else None
     model = scripted if scripted is not None else live_model
     assert model is not None
-    graph = build_graph(
-        model, service, exchange_provider=_exchange_provider(scenario, exchange_timeout)
-    )
     thread_id = str(uuid4())
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     failures: list[str] = []
     results: list[TurnResult] = []
     route_matches = pii_leaks = 0
     message_count = 0
 
-    for index, turn in enumerate(scenario.turns, start=1):
-        expect = turn.expect
-        before = {name: (work_dir / name).read_bytes() for name in expect.unchanged}
-        if scripted is not None:
-            for step in turn.script:
-                message = AIMessage(
-                    content=step if isinstance(step, str) else "",
-                    usage_metadata={"input_tokens": 120, "output_tokens": 20, "total_tokens": 140},
+    with ConversationRuntime.from_settings(
+        settings,
+        model=model,
+        exchange_provider=_exchange_provider(scenario, settings.exchange_timeout_seconds),
+        observability=observability,
+    ) as runtime:
+        for index, turn in enumerate(scenario.turns, start=1):
+            expect = turn.expect
+            before = {name: (work_dir / name).read_bytes() for name in expect.unchanged}
+            if scripted is not None:
+                for step in turn.script:
+                    message = AIMessage(
+                        content=step if isinstance(step, str) else "",
+                        usage_metadata={
+                            "input_tokens": 120,
+                            "output_tokens": 20,
+                            "total_tokens": 140,
+                        },
+                    )
+                    if not isinstance(step, str):
+                        message.tool_calls = [
+                            {
+                                "name": step.tool,
+                                "args": step.args,
+                                "id": str(uuid4()),
+                                "type": "tool_call",
+                            }
+                        ]
+                    scripted.responses.append(message)
+
+            if turn.message is not None:
+                result = runtime.run_turn(thread_id=thread_id, user_message=turn.message)
+            else:
+                assert turn.approve is not None
+                result = runtime.resume_turn(thread_id=thread_id, approved=turn.approve)
+            results.append(result)
+            state = runtime.get_state(thread_id)
+            messages = state.get("messages", [])
+            tool_text = "\n".join(
+                message.text
+                for message in messages[message_count:]
+                if isinstance(message, ToolMessage)
+            )
+            message_count = len(messages)
+            pending = result.pending_confirmation
+            telemetry = result.telemetry
+            route_ok = telemetry.agent_route == expect.route
+            route_matches += route_ok
+            leaked = _seed_pii(result.reply, cpfs, dates)
+            pii_leaks += leaked
+
+            checks = {
+                "resposta sem erro": result.reply != ERROR_REPLY,
+                "autenticação": result.authenticated == expect.authenticated,
+                "encerramento": result.conversation_ended == expect.ended,
+                "agente ativo": result.active_agent == expect.active_agent,
+                "rota": route_ok,
+                "guardrail": telemetry.guardrail_blocked == expect.guardrail_blocked,
+                "tokens": expect.total_tokens is None
+                or telemetry.total_tokens == expect.total_tokens,
+                "confirmação": (pending.novo_limite_solicitado if pending else None)
+                == expect.confirmation_amount,
+                "valor para reenvio": state.get("pending_requested_limit")
+                == expect.pending_requested_limit,
+                "pedidos no CSV": _requests(requests_path) == expect.requests,
+                "CSVs preservados": all(
+                    (work_dir / name).read_bytes() == data for name, data in before.items()
+                ),
+                "resposta das ferramentas": all(part in tool_text for part in expect.tool_contains),
+                "resposta sem PII": not leaked,
+            }
+            if expect.auth_attempts is not None:
+                checks["tentativas de autenticação"] = (
+                    state.get("auth_attempts", 0) == expect.auth_attempts
                 )
-                if not isinstance(step, str):
-                    message.tool_calls = [
-                        {
-                            "name": step.tool,
-                            "args": step.args,
-                            "id": str(uuid4()),
-                            "type": "tool_call",
-                        }
-                    ]
-                scripted.responses.append(message)
-
-        if turn.message is not None:
-            result = run_turn(
-                graph,
-                thread_id=thread_id,
-                user_message=turn.message,
-                model_name=model_name,
-                callbacks=callbacks,
+            if expect.tools is not None:
+                checks["ferramentas chamadas"] = telemetry.tools_called == expect.tools
+            if expect.client_limit is not None or expect.client_score is not None:
+                cpf = state.get("client_cpf")
+                client = clients.get(cpf) if cpf else None
+                checks["limite do cliente"] = expect.client_limit is None or (
+                    client is not None and client.limite_atual == expect.client_limit
+                )
+                checks["score do cliente"] = expect.client_score is None or (
+                    client is not None and client.score == expect.client_score
+                )
+            if scripted is not None:
+                checks["resposta do roteiro"] = all(
+                    part in result.reply for part in expect.reply_contains
+                )
+                checks["roteiro consumido"] = not scripted.responses
+                scripted.responses.clear()
+            failures.extend(
+                f"Turno {index} · {check}" for check, passed in checks.items() if not passed
             )
-        else:
-            assert turn.approve is not None
-            result = resume_turn(
-                graph,
-                thread_id=thread_id,
-                approved=turn.approve,
-                model_name=model_name,
-                callbacks=callbacks,
-            )
-        results.append(result)
-        state = graph.get_state(config).values
-        messages = state.get("messages", [])
-        tool_text = "\n".join(
-            message.text for message in messages[message_count:] if isinstance(message, ToolMessage)
-        )
-        message_count = len(messages)
-        pending = result.pending_confirmation
-        telemetry = result.telemetry
-        route_ok = telemetry.agent_route == expect.route
-        route_matches += route_ok
-        leaked = _seed_pii(result.reply, cpfs, dates)
-        pii_leaks += leaked
-
-        checks = {
-            "resposta sem erro": result.reply != ERROR_REPLY,
-            "autenticação": result.authenticated == expect.authenticated,
-            "encerramento": result.conversation_ended == expect.ended,
-            "agente ativo": result.active_agent == expect.active_agent,
-            "rota": route_ok,
-            "guardrail": telemetry.guardrail_blocked == expect.guardrail_blocked,
-            "tokens": expect.total_tokens is None or telemetry.total_tokens == expect.total_tokens,
-            "confirmação": (pending.novo_limite_solicitado if pending else None)
-            == expect.confirmation_amount,
-            "valor para reenvio": state.get("pending_requested_limit")
-            == expect.pending_requested_limit,
-            "pedidos no CSV": _requests(requests_path) == expect.requests,
-            "CSVs preservados": all(
-                (work_dir / name).read_bytes() == data for name, data in before.items()
-            ),
-            "resposta das ferramentas": all(part in tool_text for part in expect.tool_contains),
-            "resposta sem PII": not leaked,
-        }
-        if expect.auth_attempts is not None:
-            checks["tentativas de autenticação"] = (
-                state.get("auth_attempts", 0) == expect.auth_attempts
-            )
-        if expect.tools is not None:
-            checks["ferramentas chamadas"] = telemetry.tools_called == expect.tools
-        if expect.client_limit is not None or expect.client_score is not None:
-            cpf = state.get("client_cpf")
-            client = service.get_client(cpf) if cpf else None
-            checks["limite do cliente"] = expect.client_limit is None or (
-                client is not None and client.limite_atual == expect.client_limit
-            )
-            checks["score do cliente"] = expect.client_score is None or (
-                client is not None and client.score == expect.client_score
-            )
-        if scripted is not None:
-            checks["resposta do roteiro"] = all(
-                part in result.reply for part in expect.reply_contains
-            )
-            checks["roteiro consumido"] = not scripted.responses
-            scripted.responses.clear()
-        failures.extend(
-            f"Turno {index} · {check}" for check, passed in checks.items() if not passed
-        )
 
     return ScenarioEvalResult(
         id=scenario.id,
@@ -296,20 +285,22 @@ def run_evals(
         raise ValueError("Modo de avaliação inválido")
     scenarios = load_scenarios(scenarios_path)
     offline = mode == "offline"
-    if not offline and settings is None:
-        settings = Settings()
-    data_dir = settings.data_dir if settings is not None else Path("data")
-    model_name = settings.llm_model if not offline and settings is not None else "gpt-4o-mini"
-    exchange_timeout = settings.exchange_timeout_seconds if settings is not None else 8.0
     model = None
-    observability = None
-    if not offline:
+    if offline:
+        # Offline evals use known prices and do not load live configuration.
+        offline_model = "openai/gpt-4o-mini"
+        runtime_settings = (
+            Settings.model_construct(llm_model=offline_model)
+            if settings is None
+            else settings.model_copy(update={"llm_model": offline_model})
+        )
+        observability = TurnObservability()
+    else:
         from banco_agil.infrastructure.llm_factory import create_chat_model
 
-        assert settings is not None
-        model = create_chat_model(settings)
-        observability = create_langfuse_observability(settings)
-    callbacks = (observability.create_handler(),) if observability is not None else ()
+        runtime_settings = settings if settings is not None else Settings()
+        model = create_chat_model(runtime_settings)
+        observability = TurnObservability(create_langfuse_observability(runtime_settings))
     offline_env = {
         "LITELLM_LOCAL_MODEL_COST_MAP": "True",
         "LITELLM_OFFLINE_MODE": "True",
@@ -325,20 +316,17 @@ def run_evals(
                 with TemporaryDirectory(prefix="banco-agil-eval-") as directory:
                     work_dir = Path(directory)
                     for name in SEEDS:
-                        copyfile(data_dir / name, work_dir / name)
+                        copyfile(runtime_settings.data_dir / name, work_dir / name)
                     results.append(
                         _run_scenario(
                             scenario,
-                            work_dir,
+                            runtime_settings.model_copy(update={"data_dir": work_dir}),
                             live_model=model,
-                            callbacks=callbacks,
-                            model_name=model_name,
-                            exchange_timeout=exchange_timeout,
+                            observability=observability,
                         )
                     )
     finally:
-        if observability is not None:
-            observability.flush()
+        observability.flush()
 
     latencies = sorted(latency for result in results for latency in result.latencies_ms)
     passed = sum(result.passed for result in results)
