@@ -78,8 +78,8 @@ def main() -> None:
 
     new_conversation = st.sidebar.button("Nova conversa")
     if new_conversation and "client" in st.session_state and "thread_id" in st.session_state:
-        previous_client: ChatClient = st.session_state.client
-        previous_client.reset_conversation(st.session_state.thread_id)
+        client: ChatClient = st.session_state.client
+        client.reset_conversation(st.session_state.thread_id)
     if new_conversation or "thread_id" not in st.session_state:
         st.session_state.thread_id = str(uuid4())
         st.session_state.history = []
@@ -98,7 +98,7 @@ def main() -> None:
         )
         st.stop()
 
-    client: ChatClient = st.session_state.client
+    client = st.session_state.client
     _show_telemetry(
         st.session_state.last_telemetry,
         st.session_state.active_agent,

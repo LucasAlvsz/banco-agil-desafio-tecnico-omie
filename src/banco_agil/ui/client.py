@@ -4,6 +4,7 @@ from typing import Protocol, Self
 import httpx
 from pydantic import BaseModel
 
+from banco_agil.agents.graph import TurnResult
 from banco_agil.api.schemas import ChatResponse, HealthResponse
 from banco_agil.config import Settings
 from banco_agil.runtime import ConversationRuntime
@@ -117,12 +118,13 @@ class LocalChatClient:
 
     def send_message(self, *, thread_id: str, user_message: str) -> ChatResponse:
         result = self._runtime.run_turn(thread_id=thread_id, user_message=user_message)
-        return ChatResponse(
-            **result.model_dump(), thread_id=thread_id, langfuse_enabled=self.langfuse_enabled
-        )
+        return self._to_response(result, thread_id)
 
     def resume(self, *, thread_id: str, approved: bool) -> ChatResponse:
         result = self._runtime.resume_turn(thread_id=thread_id, approved=approved)
+        return self._to_response(result, thread_id)
+
+    def _to_response(self, result: TurnResult, thread_id: str) -> ChatResponse:
         return ChatResponse(
             **result.model_dump(), thread_id=thread_id, langfuse_enabled=self.langfuse_enabled
         )
