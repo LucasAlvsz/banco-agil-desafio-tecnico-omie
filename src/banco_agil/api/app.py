@@ -11,22 +11,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import RequestResponseEndpoint
 
-from banco_agil.agents.graph import ConversationGraph, build_graph, resume_turn, run_turn
 from banco_agil.api.schemas import ChatRequest, ChatResponse, HealthResponse
 from banco_agil.config import Settings
-from banco_agil.domain.services import CreditService
-from banco_agil.infrastructure.csv_repositories import (
-    CsvClientRepository,
-    CsvLimitRequestRepository,
-    CsvScoreLimitRepository,
-)
-from banco_agil.infrastructure.llm_factory import create_chat_model
-from banco_agil.infrastructure.mcp_exchange_client import create_exchange_provider
-from banco_agil.infrastructure.observability import (
-    LangfuseObservability,
-    create_langfuse_observability,
-)
 from banco_agil.infrastructure.privacy import configure_logging
+from banco_agil.runtime import ConversationRuntime
 
 logger = logging.getLogger(__name__)
 VALIDATION_LOCATIONS = {"body", *ChatRequest.model_fields}
@@ -34,9 +22,8 @@ VALIDATION_LOCATIONS = {"body", *ChatRequest.model_fields}
 
 @dataclass
 class Runtime:
-    graph: ConversationGraph
-    settings: Settings
-    observability: LangfuseObservability | None
+    conversation: ConversationRuntime
+    owns_runtime: bool
     thread_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     creation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     workers: set[asyncio.Task[ChatResponse]] = field(default_factory=set)
@@ -45,41 +32,23 @@ class Runtime:
 def create_app(
     *,
     settings: Settings | None = None,
-    graph: ConversationGraph | None = None,
-    observability: LangfuseObservability | None = None,
+    runtime: ConversationRuntime | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging()
-        runtime_settings = settings if settings is not None else Settings()
-        runtime_graph = graph
-        runtime_observability = observability
-        if runtime_graph is None:
-            credit_service = CreditService(
-                CsvClientRepository(runtime_settings.data_dir / "clientes.csv"),
-                CsvScoreLimitRepository(runtime_settings.data_dir / "score_limite.csv"),
-                CsvLimitRequestRepository(
-                    runtime_settings.data_dir / "solicitacoes_aumento_limite.csv"
-                ),
-            )
-            exchange_provider = create_exchange_provider(runtime_settings)
-            runtime_graph = build_graph(
-                create_chat_model(runtime_settings),
-                credit_service,
-                exchange_provider=exchange_provider,
-            )
-            if runtime_observability is None:
-                runtime_observability = create_langfuse_observability(runtime_settings)
-
-        runtime = Runtime(runtime_graph, runtime_settings, runtime_observability)
-        app.state.runtime = runtime
+        conversation = (
+            runtime if runtime is not None else ConversationRuntime.from_settings(settings)
+        )
+        state = Runtime(conversation, owns_runtime=runtime is None)
+        app.state.runtime = state
         try:
             yield
         finally:
-            await asyncio.gather(*runtime.workers, return_exceptions=True)
+            await asyncio.gather(*state.workers, return_exceptions=True)
             del app.state.runtime
-            if runtime_observability is not None:
-                runtime_observability.flush()
+            if state.owns_runtime:
+                state.conversation.close()
 
     app = FastAPI(lifespan=lifespan)
 
@@ -110,7 +79,7 @@ def create_app(
     @app.get("/health")
     async def health(request: Request) -> HealthResponse:
         runtime = cast(Runtime, request.app.state.runtime)
-        return HealthResponse(langfuse_enabled=runtime.observability is not None)
+        return HealthResponse(langfuse_enabled=runtime.conversation.langfuse_enabled)
 
     @app.post("/api/v1/chat")
     async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
@@ -122,28 +91,16 @@ def create_app(
                 lock = runtime.thread_locks[thread_id] = asyncio.Lock()
 
         def execute() -> ChatResponse:
-            observer = runtime.observability
-            callbacks = (observer.create_handler(),) if observer is not None else ()
-            model_name = runtime.settings.llm_model
+            conversation = runtime.conversation
             if payload.message is not None:
-                turn = run_turn(
-                    runtime.graph,
-                    thread_id=thread_id,
-                    user_message=payload.message,
-                    callbacks=callbacks,
-                    model_name=model_name,
-                )
+                turn = conversation.run_turn(thread_id=thread_id, user_message=payload.message)
             else:
                 assert payload.approve is not None
-                turn = resume_turn(
-                    runtime.graph,
-                    thread_id=thread_id,
-                    approved=payload.approve,
-                    callbacks=callbacks,
-                    model_name=model_name,
-                )
+                turn = conversation.resume_turn(thread_id=thread_id, approved=payload.approve)
             return ChatResponse(
-                **turn.model_dump(), thread_id=thread_id, langfuse_enabled=observer is not None
+                **turn.model_dump(),
+                thread_id=thread_id,
+                langfuse_enabled=conversation.langfuse_enabled,
             )
 
         def finish(worker: asyncio.Task[ChatResponse]) -> None:
