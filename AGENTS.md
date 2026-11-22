@@ -20,7 +20,7 @@ banco-agil/
 │   └── ui/             # Interface conversacional Streamlit (modo direto e cliente HTTP)
 ├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede/subprocesses)
 ├── docs/
-│   ├── spec.md         # Especificação do produto (fonte única da verdade)
+│   ├── spec.md         # Especificação de fundação (regras de negócio e contratos do MVP)
 │   ├── backlog.md      # Quadro Kanban (To Do / Doing / Done)
 │   ├── adr/            # Architecture Decision Records (000-template.md, 001..009)
 │   └── features/       # plan.md (antes) e notes.md (depois) por feature
@@ -49,6 +49,7 @@ banco-agil/
 3. **Sem antecipação (YAGNI):** adicionar dependências e módulos apenas na feature que efetivamente os utiliza.
 4. **Evolução e escala:** toda decisão de escopo do MVP com trade-offs conhecidos (ex.: persistência local, processamento síncrono) deve registrar em ADR seus limites atuais e caminhos de evolução para escala.
 5. **Segredos e privacidade:** nunca commitar `.env` ou credenciais; nunca logar dados pessoais (PII) em texto claro (veja os campos sensíveis em `docs/spec.md`).
+6. **Modelo de domínio e ADRs:** antes de explorar ou propor mudanças, ler `GLOSSARY.md` e os ADRs relevantes em `docs/adr/`; usar estritamente o vocabulário do glossário (evitando os termos em `_Avoid_`); sinalizar explicitamente qualquer conflito com um ADR existente em vez de sobrescrevê-lo silenciosamente.
 
 ## Ciclo de Vida de uma Feature (`git worktree`)
 
@@ -59,7 +60,7 @@ A partir da `F01`, cada feature é desenvolvida em um worktree isolado na pasta 
    git worktree add ../banco-agil-worktrees/fNN-nome -b feat/fNN-nome main
    ```
    Cada agente ou desenvolvedor atua exclusivamente dentro do worktree da sua feature.
-2. Escrever `docs/features/FNN-nome/plan.md` (escopo, fora de escopo, testes, critérios de aceite) e aprovar o plano antes de codar.
+2. Escrever `docs/features/FNN-nome/plan.md` (escopo, fora de escopo, seams e estratégia de testes, critérios de aceite) e aprovar o plano antes de codar.
 3. Implementar em commits pequenos usando **Conventional Commits** (`feat:`, `fix:`, `test:`, `docs:`, `build:`, `refactor:`).
 4. Se a feature concretizar uma decisão arquitetural relevante, criar o ADR correspondente em `docs/adr/` a partir de `000-template.md`.
 5. Rodar `make check` (100% verde) e revisar o diff.

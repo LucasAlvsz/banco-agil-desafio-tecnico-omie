@@ -1,6 +1,6 @@
-# Especificação Técnica — Banco Ágil
+# Especificação de Fundação — Banco Ágil
 
-Fonte única da verdade para regras de negócio, contratos de dados e decisões de arquitetura do MVP do **Banco Ágil**.
+Referência de regras de negócio, contratos de dados e limites do MVP do **Banco Ágil**. As especificações incrementais de cada entrega vivem em `docs/features/FNN-nome/plan.md` e o acompanhamento de pendências e spikes em `docs/backlog.md`.
 
 ---
 
@@ -130,9 +130,3 @@ Escolhas intencionais para manter o MVP enxuto e seus caminhos naturais de evolu
 | **Proteção contra força bruta** | Contador de 3 tentativas no estado da sessão | Rate limit e bloqueio temporário distribuído por CPF/IP (Redis/WAF) |
 | **Gateway de LLM** | LiteLLM embutido na aplicação | LiteLLM Proxy centralizado com gestão de chaves, rate limit por serviço, fallback multi-região e billing |
 | **Memória de sessão** | Checkpointer em memória (`InMemorySaver`) | Checkpointer persistente (Postgres/DynamoDB) para múltiplas réplicas stateless |
-
----
-
-## 7. Spikes em Aberto
-
-Nenhum spike estrutural em aberto — decisões arquiteturais do MVP registradas em `docs/adr/001` a `docs/adr/009`.
