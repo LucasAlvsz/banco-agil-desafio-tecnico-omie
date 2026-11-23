@@ -164,6 +164,13 @@ def test_lists_limit_requests_with_safe_error_on_stat_failure(tmp_path):
     assert error.value.__suppress_context__
 
 
+def test_rejects_a_circular_request_csv_symlink(tmp_path):
+    path = tmp_path / "requests.csv"
+    path.symlink_to(path.name)
+    with pytest.raises(PersistenceError, match="Não foi possível ler os dados CSV"):
+        CsvLimitRequestRepository(path).list_all()
+
+
 def test_append_write_failure(tmp_path):
     from banco_agil.domain.models import LimitIncreaseRequest
 

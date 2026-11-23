@@ -86,11 +86,12 @@ class CsvLimitRequestRepository:
 
     def list_all(self) -> list[LimitIncreaseRequest]:
         try:
-            if not self.path.exists() or self.path.stat().st_size == 0:
-                return []
+            empty = self.path.stat().st_size == 0
+        except FileNotFoundError:
+            return []
         except OSError:
             raise PersistenceError("Não foi possível ler os dados CSV") from None
-        return _read(self.path, LimitIncreaseRequest)
+        return [] if empty else _read(self.path, LimitIncreaseRequest)
 
     def append(self, request: LimitIncreaseRequest) -> None:
         try:
