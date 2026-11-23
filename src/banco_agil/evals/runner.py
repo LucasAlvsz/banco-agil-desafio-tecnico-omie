@@ -1,4 +1,3 @@
-import csv
 import os
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -25,23 +24,23 @@ from pydantic import Field, TypeAdapter
 
 from banco_agil.agents.graph import ERROR_REPLY, TurnResult
 from banco_agil.config import Settings
-from banco_agil.domain.errors import DomainValidationError
-from banco_agil.domain.models import Client, LimitIncreaseRequest
-from banco_agil.domain.rules import normalize_birth_date, normalize_cpf
 from banco_agil.evals.models import (
     EvalLimitRequest,
     EvalReport,
     EvalScenario,
     ScenarioEvalResult,
 )
-from banco_agil.infrastructure.csv_repositories import CsvClientRepository
+from banco_agil.infrastructure.csv_repositories import (
+    CsvClientRepository,
+    CsvLimitRequestRepository,
+)
 from banco_agil.infrastructure.exchange_client import (
     AWESOME_URL,
     FRANKFURTER_URL,
     ExchangeRateClient,
 )
 from banco_agil.infrastructure.observability import TurnObservability, create_langfuse_observability
-from banco_agil.infrastructure.privacy import CPF_PATTERN, DATE_PATTERN
+from banco_agil.infrastructure.privacy import contains_pii
 from banco_agil.mcp import McpExchangeRateProvider
 from banco_agil.runtime import ConversationRuntime
 
@@ -114,29 +113,11 @@ def _exchange_provider(scenario: EvalScenario, timeout: float) -> McpExchangeRat
     )
 
 
-def _seed_pii(reply: str, cpfs: set[str], dates: set[str]) -> bool:
-    for match in CPF_PATTERN.finditer(reply):
-        if normalize_cpf(match.group()) in cpfs:
-            return True
-    for match in DATE_PATTERN.finditer(reply):
-        try:
-            if normalize_birth_date(match.group()) in dates:
-                return True
-        except DomainValidationError:
-            continue
-    return False
-
-
-def _requests(path: Path) -> tuple[EvalLimitRequest, ...]:
-    with path.open(encoding="utf-8", newline="") as file:
-        return tuple(
-            EvalLimitRequest.model_validate(
-                LimitIncreaseRequest.model_validate(row).model_dump(
-                    exclude={"data_hora_solicitacao"}
-                )
-            )
-            for row in csv.DictReader(file)
-        )
+def _requests(requests: CsvLimitRequestRepository) -> tuple[EvalLimitRequest, ...]:
+    return tuple(
+        EvalLimitRequest.model_validate(request.model_dump(exclude={"data_hora_solicitacao"}))
+        for request in requests.list_all()
+    )
 
 
 def _aggregate_cost(costs: Sequence[float | None]) -> float | None:
@@ -153,8 +134,8 @@ def _run_scenario(
     work_dir = settings.data_dir
     clients_path, _, requests_path = (work_dir / name for name in SEEDS)
     clients = CsvClientRepository(clients_path)
-    with clients_path.open(encoding="utf-8", newline="") as file:
-        seeds = [Client.model_validate(row) for row in csv.DictReader(file)]
+    requests = CsvLimitRequestRepository(requests_path)
+    seeds = clients.list_all()
     cpfs = {client.cpf for client in seeds}
     dates = {client.data_nascimento for client in seeds}
     scripted = EvalScriptedChatModel() if live_model is None else None
@@ -214,7 +195,7 @@ def _run_scenario(
             telemetry = result.telemetry
             route_ok = telemetry.agent_route == expect.route
             route_matches += route_ok
-            leaked = _seed_pii(result.reply, cpfs, dates)
+            leaked = contains_pii(result.reply, cpfs=cpfs, birth_dates=dates)
             pii_leaks += leaked
 
             checks = {
@@ -230,7 +211,7 @@ def _run_scenario(
                 == expect.confirmation_amount,
                 "valor para reenvio": state.get("pending_requested_limit")
                 == expect.pending_requested_limit,
-                "pedidos no CSV": _requests(requests_path) == expect.requests,
+                "pedidos no CSV": _requests(requests) == expect.requests,
                 "CSVs preservados": all(
                     (work_dir / name).read_bytes() == data for name, data in before.items()
                 ),

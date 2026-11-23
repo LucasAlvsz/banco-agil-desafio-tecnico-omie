@@ -77,15 +77,16 @@ def test_load_scenarios_rejects_duplicate_ids_and_invalid_turns(tmp_path, single
         load_scenarios(path)
 
 
+@pytest.mark.parametrize("reply", ["CPF 123.456.789-01", "Nascimento 22/11/1985"])
 def test_evals_detect_route_mismatch_and_pii_then_exit_one(
-    monkeypatch, single_scenario, capsys, isolated_logging
+    monkeypatch, single_scenario, capsys, isolated_logging, reply
 ):
     path = single_scenario(expect={"route": ["credito"]})
     monkeypatch.setattr(
         ConversationRuntime,
         "run_turn",
         lambda *args, **kwargs: TurnResult(
-            reply="CPF 123.456.789-01",
+            reply=reply,
             conversation_ended=False,
             active_agent="triagem",
             authenticated=False,
@@ -97,10 +98,6 @@ def test_evals_detect_route_mismatch_and_pii_then_exit_one(
     assert report.route_accuracy == 0
     assert not report.scenarios[0].passed
     assert any("resposta sem PII" in item for item in report.scenarios[0].failures)
-
-    for value in ("1985-11-22", "22/11/1985"):
-        assert runner._seed_pii(value, set(), {"1985-11-22"})
-    assert not runner._seed_pii("CPF 10000000000, 32/05/1990", set(), {"1990-05-14"})
 
 
 def test_cli_table_json_and_invalid_dataset(capsys, tmp_path, isolated_logging):

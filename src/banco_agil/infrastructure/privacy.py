@@ -1,30 +1,50 @@
 import logging
 import re
 import traceback
+from collections.abc import Collection
 from threading import RLock
 from typing import Any
 
 from banco_agil.domain.errors import DomainValidationError
-from banco_agil.domain.rules import normalize_birth_date
+from banco_agil.domain.rules import normalize_birth_date, normalize_cpf
 
 REDACTED_PLACEHOLDER = "[dado omitido]"
-CPF_PATTERN = re.compile(r"(?<!\d)[0-9](?:[.\-\s]*[0-9]){10}(?!\d)")
-DATE_PATTERN = re.compile(
+_CPF_PATTERN = re.compile(r"(?<!\d)[0-9](?:[.\-\s]*[0-9]){10}(?!\d)")
+_DATE_PATTERN = re.compile(
     r"(?<!\d)(?:[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|"
     r"[0-9]{1,2}([/.-])[0-9]{1,2}\1[0-9]{4})(?!\d)"
 )
-SECRET_PATTERN = re.compile(
+_SECRET_PATTERN = re.compile(
     r"\b(?:(?i:Bearer)[ \t]+[A-Za-z0-9._~+/-]+=*|"
     r"(?:gsk_|pk-lf-|sk-lf-|sk-|AIza|AKIA)[A-Za-z0-9_-]+)"
 )
 _LOGGING_LOCK = RLock()
 
 
+def contains_pii(
+    text: str, *, cpfs: Collection[str] = (), birth_dates: Collection[str] = ()
+) -> bool:
+    known_cpfs = {normalize_cpf(cpf) for cpf in cpfs}
+    known_birth_dates = {normalize_birth_date(date) for date in birth_dates}
+    if known_cpfs and any(
+        normalize_cpf(match.group()) in known_cpfs for match in _CPF_PATTERN.finditer(text)
+    ):
+        return True
+    if known_birth_dates:
+        for match in _DATE_PATTERN.finditer(text):
+            try:
+                if normalize_birth_date(match.group()) in known_birth_dates:
+                    return True
+            except DomainValidationError:
+                continue
+    return False
+
+
 def mask_pii(text: str, *, preserve_dates_except: str | None = None) -> str:
-    text = SECRET_PATTERN.sub(REDACTED_PLACEHOLDER, text)
-    text = CPF_PATTERN.sub(REDACTED_PLACEHOLDER, text)
+    text = _SECRET_PATTERN.sub(REDACTED_PLACEHOLDER, text)
+    text = _CPF_PATTERN.sub(REDACTED_PLACEHOLDER, text)
     if preserve_dates_except is None:
-        return DATE_PATTERN.sub(REDACTED_PLACEHOLDER, text)
+        return _DATE_PATTERN.sub(REDACTED_PLACEHOLDER, text)
 
     def redact_birth_date(match: re.Match[str]) -> str:
         candidate = match.group()
@@ -35,7 +55,7 @@ def mask_pii(text: str, *, preserve_dates_except: str | None = None) -> str:
             pass
         return candidate
 
-    return DATE_PATTERN.sub(redact_birth_date, text)
+    return _DATE_PATTERN.sub(redact_birth_date, text)
 
 
 def mask_pii_data(value: Any) -> Any:
