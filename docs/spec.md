@@ -37,9 +37,9 @@ Os campos `cpf` e `data_nascimento` são tratados como dados pessoais sensíveis
 | :--- | :--- | :--- | :--- |
 | `cpf` | `str` (11 dígitos) | `12345678901` | Armazenado apenas com dígitos; entrada aceita com ou sem pontuação. |
 | `nome` | `str` | `Ana Souza` | Utilizado na saudação contextual após autenticação. |
-| `data_nascimento` | `str` (`YYYY-MM-DD`) | `1990-05-14` | Entrada aceita `DD/MM/AAAA` ou `YYYY-MM-DD`. |
+| `data_nascimento` | `str` (`YYYY-MM-DD`) | `1990-05-14` | Entrada aceita `DD/MM/AAAA`, `YYYY-MM-DD`, `DD-MM-AAAA` ou `DD.MM.AAAA`. |
 | `limite_atual` | `float` | `2500.00` | Atualizado quando um pedido de aumento é `aprovado`. |
-| `score` | `int` (`0..1000`) | `480` | Atualizado pelo Agente de Entrevista de Crédito. |
+| `score` | `int` (`0..1000`) | `420` | Atualizado pelo Agente de Entrevista de Crédito. |
 
 ### 3.2. `score_limite.csv` *(tabela de faixas em degraus)*
 | Coluna | Tipo | Exemplo | Regra |
@@ -94,6 +94,7 @@ score_final = round(max(0, min(1000, score_bruto)))
 
 ### Retorno da Entrevista de Crédito
 - O valor de limite anteriormente desejado é preservado no estado do atendimento durante a entrevista.
+- Se o cliente desistir ou interromper a entrevista antes da conclusão (`voltar_para_triagem`), o valor pendente (`pending_requested_limit`) é limpo deterministicamente para não reabrir pedidos já rejeitados.
 - Ao concluir a entrevista e atualizar o score em `clientes.csv`, o controle retorna ao Agente de Crédito, que informa o novo score e propõe reenviar o pedido com o valor anterior (permitindo ao cliente confirmar ou informar outro valor).
 - Confirmada a submissão, um **novo** pedido é registrado em `solicitacoes_aumento_limite.csv`.
 
@@ -113,7 +114,7 @@ score_final = round(max(0, min(1000, score_bruto)))
 - **Orquestração e runtime:** `LangGraph` com estado tipado, persistência de atendimento via checkpointer (`thread_id`) e topologia de handoffs com 4 nós explícitos, `ToolNode` isolado por agente e função de roteamento condicional determinística (ADR 003), encapsulados pelo `ConversationRuntime` (`src/banco_agil/runtime.py`).
 - **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o estado confiável do atendimento (`authenticated`, `client_cpf`) exclusivamente via `ToolRuntime`, nunca de argumentos livres gerados pelo LLM.
 - **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)` com contratos tipados (ADR 004).
-- **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, OpenRouter, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
+- **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, OpenRouter, Amazon Bedrock) via variáveis de ambiente, suportar modelos de *reasoning* (`drop_params=True` e `LLM_REASONING_EFFORT` opcional, ADR 002) e obter estimativa de custo por token.
 - **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) via `TurnObservability`, exibida na UI e combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
 - **Exposição e UI:** interface conversacional em **Streamlit** sobre o protocolo `ChatClient` (modo direto em memória via `LocalChatClient` e modo cliente HTTP via `HttpChatClient`), API REST assíncrona em **FastAPI** e empacotamento com **Docker**.
 - **MCP:** servidor `MCPServer` (`mcp` v2, stateless e sem PII) e cliente `McpExchangeRateProvider` colocalizados em `banco_agil.mcp` atrás de `ExchangeRateProvider` (ADR 009); ferramentas autenticadas permanecem locais com `ToolRuntime`.

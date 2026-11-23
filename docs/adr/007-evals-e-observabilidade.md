@@ -66,7 +66,7 @@ turno e ownership explícito de `flush()` no `ConversationRuntime`. Na F16, o ex
 de evals passou a verificar vazamentos via `contains_pii()` (`privacy.py`) e a ler o
 estado dos CSVs via `list_all()` nos repositórios concretos.
 
-## Atualização (suíte expandida e diagnósticos live)
+## Atualização (suíte expandida, diagnósticos e compatibilidade Langfuse v4)
 
 - **Data:** 2026-11-23
 
@@ -74,4 +74,7 @@ A suíte declarativa em `evals/scenarios.json` foi expandida para 21 cenários (
 transições entre especialistas como `credito → triagem → cambio` e interrupções de
 entrevista), com suporte a `reply_patterns`, `reply_not_contains`, diagnósticos
 detalhados sem PII por falha de turno e filtros de CLI (`--scenario` e `--runs`) para
-validação seletiva nos modos offline e `live`.
+validação seletiva nos modos offline e `live`. Além disso, `langchain>=1.0.0,<2` foi
+declarada explicitamente em `pyproject.toml` por exigência de importação em runtime do
+`langfuse.langchain.CallbackHandler` no Langfuse v4, preservando a ativação opcional
+via `.env`.

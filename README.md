@@ -70,7 +70,7 @@ O turno termina quando o agente responde sem chamar ferramentas. Após encerrame
 | Entrevista | `calcular_e_atualizar_score` | Volta ao crédito após salvar o score, preservando o valor desejado. |
 | Câmbio | `consultar_cotacao` | Informa a cotação em BRL e pergunta se pode ajudar em algo mais. |
 
-Todos os agentes têm `encerrar_atendimento`. Os especialistas usam `voltar_para_triagem` quando o cliente muda de assunto ou pede outro serviço. A Entrevista também usa a ferramenta se o cliente desistir da entrevista. A autenticação é preservada ao voltar à Triagem.
+Todos os agentes têm `encerrar_atendimento`. Os especialistas usam `voltar_para_triagem` quando o cliente muda de assunto ou pede outro serviço — e, se o cliente pedir essa mudança para depois do resultado na mesma mensagem, executam primeiro sua ferramenta para que a Triagem inclua o resultado na resposta. A Entrevista também usa `voltar_para_triagem` se o cliente desistir, limpando `pending_requested_limit` em código para não reabrir pedidos rejeitados. A autenticação é preservada ao voltar à Triagem.
 
 ### Serviços e fronteira de segurança
 
@@ -152,12 +152,12 @@ CPF e data de nascimento são tratados como PII e mascarados em logs, traces e r
 
 ## Funcionalidades implementadas
 
-- **Autenticação.** Valida CPF (11 dígitos) e data contra `clientes.csv`. Entradas mal formatadas não consomem tentativa; erros usam resposta genérica (“Os dados não conferem”) e a 3ª falha consecutiva encerra o atendimento.
+- **Autenticação.** Valida CPF (11 dígitos, com ou sem pontuação) e data de nascimento (`DD/MM/AAAA`, `YYYY-MM-DD`, `DD-MM-AAAA` ou `DD.MM.AAAA`), juntos ou em turnos separados, contra `clientes.csv`. Entradas mal formatadas não consomem tentativa; erros usam resposta genérica (“Os dados não conferem”) e a 3ª falha consecutiva encerra o atendimento.
 - **Limite e confirmação humana (HITL).** Consulta o limite vigente e exige valor estritamente superior para aumento, pausando em `interrupt()` antes de persistir. A retomada exige `StrictBool` (`LimitIncreaseDecision`); cancelar encerra sem gravar e confirmar avalia contra a faixa de score.
-- **Entrevista de crédito.** Coleta os 5 indicadores financeiros, calcula o score em Python (fórmula abaixo), atualiza `clientes.csv` e devolve ao crédito preservando o valor anterior para reenvio mediante nova confirmação.
+- **Entrevista de crédito.** Coleta os 5 indicadores financeiros (aceitando respostas parciais em múltiplos turnos), calcula o score em Python (fórmula abaixo), atualiza `clientes.csv` e devolve ao crédito preservando o valor anterior para reenvio mediante nova confirmação; se o cliente desistir, `voltar_para_triagem` limpa `pending_requested_limit`.
 - **Câmbio.** Consulta via `mcp.client.Client` → `MCPServer` (`inmemory`, `stdio` ou `streamable_http`), usando AwesomeAPI como fonte primária e Frankfurter (BCE) como fallback com data de referência preservada.
 - **Robustez e privacidade.** Guardrail de entrada (limite de 2.000 caracteres e bloqueio de *prompt injection* antes do LLM), escopo estrito nos prompts, `recursion_limit=16`, `PiiMaskingFilter` global e `contains_pii` para auditoria de CPF e data de nascimento.
-- **Observabilidade e avaliações.** Telemetria local por turno na sidebar (`TurnObservability`), exportação opcional ao Langfuse v4 (`mask` + `mask_otel_spans`) e 21 cenários declarativos (modos offline e `live`).
+- **Observabilidade e avaliações.** Telemetria local por turno na sidebar (`TurnObservability`), exportação opcional ao Langfuse v4 (`mask` + `mask_otel_spans`) e 21 cenários declarativos (modos offline e `live`, com filtros de execução e diagnósticos detalhados sem PII).
 - **Canais.** API assíncrona FastAPI (`GET /health`, `POST /api/v1/chat`), Streamlit desacoplado via `ChatClient` e Docker Compose com `mcp-exchange`, `api` e `ui`.
 
 ```text
@@ -179,6 +179,9 @@ Pesos: emprego (`formal: 300`, `autônomo: 200`, `desempregado: 0`), dependentes
 | Cancelar uma requisição HTTP pode deixar uma thread rodando enquanto chega outro turno para o mesmo atendimento. | A API executa o grafo em `asyncio.to_thread` sob `asyncio.shield`, libera o lock por `thread_id` via `add_done_callback` ao término e serializa escritas nos CSVs com `CreditService._write_lock`. |
 | Composição duplicada entre API, UI direta e evals gerava perda de `flush()` ao reiniciar conversa, reuso de `CallbackHandler` entre cenários e ciclo de dependência entre observabilidade e agentes. | `ConversationRuntime` unificou a composição com ownership de `flush()` e `reset_thread()` (`delete_thread` reutilizando o runtime via `ChatClient`), enquanto `TurnObservability` quebrou o ciclo e cria um handler por turno. |
 | `langchain-mcp-adapters` 0.3.x é incompatível com o MCP v2, e o serviço de câmbio exige fronteira restrita. | Servidor e cliente usam o SDK oficial v2 em `src/banco_agil/mcp/exchange.py`. `TransportSecuritySettings` mantém proteção contra DNS rebinding e apenas a API monta `./data`. |
+| Modelos de *reasoning* rejeitam `temperature` customizada ou níveis de `reasoning_effort` não suportados pelo provedor. | `create_chat_model` passa `drop_params=True` e aceita `LLM_REASONING_EFFORT` restrito ao subconjunto seguro (`none`..`high`). |
+| `langfuse` v4 importa `langchain` no `CallbackHandler` sem declará-lo em `Requires-Dist`. | Declaramos `langchain` explicitamente em `pyproject.toml`, mantendo a exportação Langfuse 100% opcional em runtime via `.env`. |
+| Traces reais no Langfuse expuseram alucinação de cotações no nó de crédito, descarte do texto pós-aprovação ao voltar à Triagem no mesmo turno e reabertura de pedido rejeitado após desistência da entrevista. | Mantivemos o especialista ativo ao encerrar o tópico, limpamos `pending_requested_limit` em código ao sair da entrevista, reforçamos o escopo estrito de cada especialista e cobrimos as transições (inclusive `credito → triagem → cambio`) nos 21 evals com verificações `live`. |
 
 ## Escolhas técnicas e justificativas
 
@@ -287,9 +290,10 @@ make test
 make evals
 uv run python -m banco_agil.evals --json
 uv run python -m banco_agil.evals --mode live
+uv run python -m banco_agil.evals --mode live --scenario credit_approved_then_exchange_quote --runs 2
 ```
 
-`make check` executa `ruff check`, `ruff format --check`, `mypy --strict` e `pytest` com cobertura — [conftest.py](tests/conftest.py) bloqueia sockets, DNS e `subprocess.Popen`, exercitando HTTP (`httpx.MockTransport`), API (`ASGITransport`), Streamlit (`AppTest`) e MCP em memória sem rede. `make evals` roda os 21 cenários de [scenarios.json](evals/scenarios.json) em CSVs temporários; `--mode live` usa o LLM configurado.
+`make check` executa `ruff check`, `ruff format --check`, `mypy --strict` e `pytest` com cobertura — [conftest.py](tests/conftest.py) bloqueia sockets, DNS e `subprocess.Popen`, exercitando HTTP (`httpx.MockTransport`), API (`ASGITransport`), Streamlit (`AppTest`) e MCP em memória sem rede. `make evals` roda os 21 cenários de [scenarios.json](evals/scenarios.json) em CSVs temporários — ambos os modos (`offline` e `live`) aceitam `--scenario`/`--runs` e verificam rotas, ferramentas, CSVs, PII, `reply_patterns` e `reply_not_contains`; `--mode live` usa o LLM configurado.
 
 ## Evolução e escala
 
