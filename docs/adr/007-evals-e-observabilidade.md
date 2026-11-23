@@ -55,3 +55,13 @@ nascimento e credenciais conhecidas precisam de proteção também na exportaç�
   avaliadores semânticos para avaliar a qualidade da linguagem e das recusas.
 - Ajustar `sample_rate` conforme o volume de traces. Definir alertas de SLO para
   latência p95, custo por atendimento e taxas de falhas e bloqueios.
+
+## Atualização (F12/F16)
+
+- **Data:** 2026-11-22
+
+Na F12, `TurnObservability` e `TurnScope` isolaram a instrumentação por turno sem
+acoplamento circular com `agents`, garantindo um handler Langfuse independente por
+turno e ownership explícito de `flush()` no `ConversationRuntime`. Na F16, o executor
+de evals passou a verificar vazamentos via `contains_pii()` (`privacy.py`) e a ler o
+estado dos CSVs via `list_all()` nos repositórios concretos.

@@ -41,7 +41,7 @@ Estruturar o `README.md` em português, objetivo e escaneável, com as seguintes
    - Determinismo total em testes (bloqueio de sockets e `subprocess.Popen` em `tests/conftest.py`, `httpx.MockTransport`, `ASGITransport`, `AppTest` e `mcp.client.Client(server)` em memória).
 
 5. **Escolhas Técnicas e Justificativas**
-   - Tabela consolidada referenciando os **9 ADRs** ([docs/adr/001](docs/adr/001-dominio-e-persistencia-csv.md) a [docs/adr/009](docs/adr/009-servidor-mcp-cambio-e-fronteira-de-seguranca.md)) com decisão adotada, alternativa descartada e motivação.
+   - Tabela consolidada referenciando os **9 ADRs** ([docs/adr/001](../../adr/001-dominio-e-persistencia-csv.md) a [docs/adr/009](../../adr/009-servidor-mcp-cambio-e-fronteira-de-seguranca.md)) com decisão adotada, alternativa descartada e motivação.
 
 6. **Tutorial de Execução e Testes**
    - Pré-requisitos (`Python 3.12+`, `uv`, Docker opcional).

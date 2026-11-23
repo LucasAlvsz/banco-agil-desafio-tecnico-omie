@@ -92,7 +92,7 @@ deve ser adicionada ao pytest.
 
 ## Atualização (F13)
 
-**Data** 2026-11-22
+- **Data:** 2026-11-22
 
 A UI Streamlit usa a interface `ChatClient` para conduzir o Atendimento por meio
 dos adaptadores `HttpChatClient` e `LocalChatClient`.

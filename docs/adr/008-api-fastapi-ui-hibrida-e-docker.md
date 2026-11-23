@@ -68,3 +68,14 @@ reinícios de contêiner.
   limiting distribuído com WAF ou Redis antes da exposição pública.
 - Adotar SSE para respostas parciais ou WebSocket para interação bidirecional
   quando a latência percebida justificar streaming.
+
+## Atualização (F12/F13)
+
+- **Data:** 2026-11-22
+
+O `lifespan` da API passou a delegar a composição do grafo, serviço de crédito,
+câmbio e observabilidade ao `ConversationRuntime.from_settings` (F12), mantendo o
+controle de concorrência assíncrona em `ApiRuntimeState`. Na UI Streamlit (F13), os
+modos direto e HTTP foram unificados atrás do protocolo `ChatClient`
+(`LocalChatClient` e `HttpChatClient`), deixando `ui/app.py` como camada de
+apresentação pura.

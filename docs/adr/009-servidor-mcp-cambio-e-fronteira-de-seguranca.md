@@ -54,3 +54,9 @@ mantém ativa a proteção contra DNS rebinding.
 - Quando o volume justificar, reutilizar conexões HTTP e avaliar cache distribuído por moeda, com TTL de 30–60 segundos, e circuit breaker para provedores indisponíveis, conforme o ADR 005.
 - Quando outros domínios precisarem de ferramentas bancárias remotas, adotar MCP Auth com OAuth 2.1 e escopos por ferramenta. Validar emissor, audiência e escopos dos tokens e vincular o cliente à identidade verificada no servidor. Projetar a retomada do HITL junto com o armazenamento persistente do grafo.
 - Avaliar autenticação entre serviços e mTLS quando o tráfego cruzar redes de confiança distintas.
+
+## Atualização (F15)
+
+- **Data:** 2026-11-22
+
+O protocolo de fio, o servidor MCP, o cliente `McpExchangeRateProvider` e a factory `create_exchange_provider` foram colocalizados em `src/banco_agil/mcp/exchange.py` com fachada estreita em `banco_agil.mcp`, reduzindo `exchange_server.py` a entrypoint CLI fino e centralizando a validação de `MCP_EXCHANGE_URL` em `Settings.resolve_mcp_exchange_url()`.

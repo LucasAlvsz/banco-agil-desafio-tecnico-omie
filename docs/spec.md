@@ -52,7 +52,7 @@ O modelo em degraus elimina por construção lacunas ou sobreposições entre fa
 ### 3.3. `solicitacoes_aumento_limite.csv` *(registro append-only de pedidos)*
 | Coluna | Tipo | Exemplo | Regra |
 | :--- | :--- | :--- | :--- |
-| `cpf_cliente` | `str` | `12345678901` | CPF autenticado na sessão (proveniente exclusivamente do estado confiável). |
+| `cpf_cliente` | `str` | `12345678901` | CPF autenticado no atendimento (proveniente exclusivamente do estado confiável). |
 | `data_hora_solicitacao` | `str` (ISO 8601) | `2026-11-21T03:00:00-03:00` | Timestamp com timezone. |
 | `limite_atual` | `float` | `2500.00` | Limite vigente no momento do pedido. |
 | `novo_limite_solicitado` | `float` | `6000.00` | Deve ser estritamente maior que `limite_atual`. |
@@ -66,7 +66,7 @@ O modelo em degraus elimina por construção lacunas ou sobreposições entre fa
 - Conta como tentativa de autenticação apenas um par bem-formado (CPF com 11 dígitos e data válida) sem correspondência em `clientes.csv`.
 - Entradas mal formatadas solicitam correção sem consumir o contador de tentativas.
 - A mensagem de falha deve ser genérica (*"dados não conferem"*), sem indicar qual campo falhou (prevenção de enumeração de CPFs).
-- Na 3ª falha consecutiva na sessão, o atendimento é encerrado automaticamente com mensagem cordial.
+- Na 3ª falha consecutiva no atendimento, o atendimento é encerrado automaticamente com mensagem cordial.
 
 ### Consulta e Aumento de Limite
 - `clientes.csv` é a fonte da verdade de `limite_atual` e `score`; `solicitacoes_aumento_limite.csv` é um registro de pedidos.
@@ -93,7 +93,7 @@ score_final = max(0, min(1000, round(score_bruto)))
 - Casos de borda conhecidos e cobertos por testes: `despesas_fixas == 0` (valor bruto excede 1000 → clamp em `1000`); desempregado + 3+ dependentes + dívidas + renda `0` (valor bruto `-70` → clamp em `0`).
 
 ### Retorno da Entrevista de Crédito
-- O valor de limite anteriormente desejado é preservado no estado da sessão durante a entrevista.
+- O valor de limite anteriormente desejado é preservado no estado do atendimento durante a entrevista.
 - Ao concluir a entrevista e atualizar o score em `clientes.csv`, o controle retorna ao Agente de Crédito, que informa o novo score e propõe reenviar o pedido com o valor anterior (permitindo ao cliente confirmar ou informar outro valor).
 - Confirmada a submissão, um **novo** pedido é registrado em `solicitacoes_aumento_limite.csv`.
 
@@ -109,13 +109,13 @@ score_final = max(0, min(1000, round(score_bruto)))
 
 ## 5. Arquitetura do MVP
 
-- **Orquestração:** `LangGraph` com estado tipado, persistência de sessão via checkpointer (`thread_id`) e topologia de handoffs com 4 nós explícitos, `ToolNode` isolado por agente e roteador condicional determinístico único (ADR 003).
-- **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o estado confiável da sessão (`authenticated`, `client_cpf`) exclusivamente via `ToolRuntime`, nunca de argumentos livres gerados pelo LLM.
-- **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)` (ADR 004).
-- **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, Anthropic, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
-- **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) exibida na UI, combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
-- **Exposição e UI:** interface conversacional em **Streamlit** (modo direto em memória e modo cliente HTTP), API REST assíncrona em **FastAPI** e empacotamento com **Docker**.
-- **MCP:** servidor `MCPServer` (`mcp` v2, stateless e sem PII) para consulta de câmbio consumido pelo Agente de Câmbio via `mcp.client.Client` atrás de `ExchangeRateProvider` (ADR 009); ferramentas autenticadas permanecem locais com `ToolRuntime`.
+- **Orquestração e runtime:** `LangGraph` com estado tipado, persistência de atendimento via checkpointer (`thread_id`) e topologia de handoffs com 4 nós explícitos, `ToolNode` isolado por agente e função de roteamento condicional determinística (ADR 003), encapsulados pelo `ConversationRuntime` (`src/banco_agil/runtime.py`).
+- **Segurança de ferramentas:** ferramentas pós-autenticação obtêm o estado confiável do atendimento (`authenticated`, `client_cpf`) exclusivamente via `ToolRuntime`, nunca de argumentos livres gerados pelo LLM.
+- **Human-in-the-Loop (HITL):** uso de `interrupt()` nativo do LangGraph antes de gravar qualquer pedido de aumento de limite (inicial ou pós-entrevista), retomando via `Command(resume=...)` com contratos tipados (ADR 004).
+- **Camada de LLM:** `langchain-litellm` isolado em uma factory retornando `BaseChatModel`, permitindo trocar de provedor (Groq, Gemini, OpenAI, OpenRouter, Amazon Bedrock) via variáveis de ambiente e obter estimativa de custo por token.
+- **Observabilidade:** telemetria local sempre ativa por turno (latência, tokens, custo estimado em USD, agente ativo) via `TurnObservability`, exibida na UI e combinada com integração opcional ao **Langfuse** via `.env` (com mascaramento de PII).
+- **Exposição e UI:** interface conversacional em **Streamlit** sobre o protocolo `ChatClient` (modo direto em memória via `LocalChatClient` e modo cliente HTTP via `HttpChatClient`), API REST assíncrona em **FastAPI** e empacotamento com **Docker**.
+- **MCP:** servidor `MCPServer` (`mcp` v2, stateless e sem PII) e cliente `McpExchangeRateProvider` colocalizados em `banco_agil.mcp` atrás de `ExchangeRateProvider` (ADR 009); ferramentas autenticadas permanecem locais com `ToolRuntime`.
 
 ---
 
@@ -127,6 +127,6 @@ Escolhas intencionais para manter o MVP enxuto e seus caminhos naturais de evolu
 | :--- | :--- | :--- |
 | **Persistência** | Arquivos CSV locais atrás de interfaces de repositório | Banco relacional transacional (ex.: PostgreSQL/RDS) com bloqueio otimista e auditoria |
 | **Avaliação de crédito** | Síncrona e determinística na requisição (status `pendente` transitório em domínio) | Fila assíncrona (SQS/Kafka) + motor de crédito/antifraude com status `pendente` persistido e notificação posterior |
-| **Proteção contra força bruta** | Contador de 3 tentativas no estado da sessão | Rate limit e bloqueio temporário distribuído por CPF/IP (Redis/WAF) |
+| **Proteção contra força bruta** | Contador de 3 tentativas no estado do atendimento | Rate limit e bloqueio temporário distribuído por CPF/IP (Redis/WAF) |
 | **Gateway de LLM** | LiteLLM embutido na aplicação | LiteLLM Proxy centralizado com gestão de chaves, rate limit por serviço, fallback multi-região e billing |
-| **Memória de sessão** | Checkpointer em memória (`InMemorySaver`) | Checkpointer persistente (Postgres/DynamoDB) para múltiplas réplicas stateless |
+| **Memória do atendimento** | Checkpointer em memória (`InMemorySaver`) | Checkpointer persistente (Postgres/DynamoDB) para múltiplas réplicas stateless |
