@@ -6,7 +6,7 @@ Atendimento bancário digital multiagente para autenticação, consulta e aument
 
 O LLM conduz a conversa e aciona ferramentas; código determinístico valida identidade e autorização, calcula o score, avalia pedidos e persiste os dados. Consulte a [especificação do produto](docs/spec.md) para regras e contratos e o [glossário](GLOSSARY.md) para o vocabulário de domínio.
 
-**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **506 testes** (99% de cobertura), `mypy --strict` e **12/12 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
+**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **566 testes** (99% de cobertura), `mypy --strict` e **21/21 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
 
 ## Arquitetura do sistema
 
@@ -157,7 +157,7 @@ CPF e data de nascimento são tratados como PII e mascarados em logs, traces e r
 - **Entrevista de crédito.** Coleta os 5 indicadores financeiros, calcula o score em Python (fórmula abaixo), atualiza `clientes.csv` e devolve ao crédito preservando o valor anterior para reenvio mediante nova confirmação.
 - **Câmbio.** Consulta via `mcp.client.Client` → `MCPServer` (`inmemory`, `stdio` ou `streamable_http`), usando AwesomeAPI como fonte primária e Frankfurter (BCE) como fallback com data de referência preservada.
 - **Robustez e privacidade.** Guardrail de entrada (limite de 2.000 caracteres e bloqueio de *prompt injection* antes do LLM), escopo estrito nos prompts, `recursion_limit=16`, `PiiMaskingFilter` global e `contains_pii` para auditoria de CPF e data de nascimento.
-- **Observabilidade e avaliações.** Telemetria local por turno na sidebar (`TurnObservability`), exportação opcional ao Langfuse v4 (`mask` + `mask_otel_spans`) e 12 cenários declarativos (modos offline e `live`).
+- **Observabilidade e avaliações.** Telemetria local por turno na sidebar (`TurnObservability`), exportação opcional ao Langfuse v4 (`mask` + `mask_otel_spans`) e 21 cenários declarativos (modos offline e `live`).
 - **Canais.** API assíncrona FastAPI (`GET /health`, `POST /api/v1/chat`), Streamlit desacoplado via `ChatClient` e Docker Compose com `mcp-exchange`, `api` e `ui`.
 
 ```text
@@ -289,7 +289,7 @@ uv run python -m banco_agil.evals --json
 uv run python -m banco_agil.evals --mode live
 ```
 
-`make check` executa `ruff check`, `ruff format --check`, `mypy --strict` e `pytest` com cobertura — [conftest.py](tests/conftest.py) bloqueia sockets, DNS e `subprocess.Popen`, exercitando HTTP (`httpx.MockTransport`), API (`ASGITransport`), Streamlit (`AppTest`) e MCP em memória sem rede. `make evals` roda os 12 cenários de [scenarios.json](evals/scenarios.json) em CSVs temporários; `--mode live` usa o LLM configurado.
+`make check` executa `ruff check`, `ruff format --check`, `mypy --strict` e `pytest` com cobertura — [conftest.py](tests/conftest.py) bloqueia sockets, DNS e `subprocess.Popen`, exercitando HTTP (`httpx.MockTransport`), API (`ASGITransport`), Streamlit (`AppTest`) e MCP em memória sem rede. `make evals` roda os 21 cenários de [scenarios.json](evals/scenarios.json) em CSVs temporários; `--mode live` usa o LLM configurado.
 
 ## Evolução e escala
 

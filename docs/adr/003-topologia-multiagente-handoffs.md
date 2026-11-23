@@ -44,3 +44,9 @@ Adotamos a topologia de **handoffs com 4 nós explícitos de agentes, `ToolNode`
 - **Crescimento do número de especialistas:** acima de ~8–10 domínios independentes, evoluir a entrada pós-autenticação para um classificador/roteador dedicado (ou subgrafos por macro-domínio), mantendo o isolamento de `ToolNode`s e o gate determinístico de autenticação.
 - **Otimização custo/latência por papel:** com nós separados, é possível injetar modelos menores/mais rápidos nos nós de triagem e câmbio e modelos de maior raciocínio em crédito e entrevista sem alterar a topologia.
 - **Execução distribuída:** combinada a um checkpointer persistente (ADR 002) e a um `ToolRuntime` recebendo contexto por requisição, a topologia opera de forma stateless entre réplicas.
+
+## Atualização (encerramento de tópico e retorno à Triagem)
+
+- **Data:** 2026-11-23
+
+Ao concluir um assunto específico (consulta de limite, aprovação/cancelamento de aumento ou cotação de câmbio), o especialista permanece como `active_agent`, responde diretamente ao cliente e encerra apenas o tópico, evitando uma chamada extra de LLM e o descarte do resultado na Triagem. `voltar_para_triagem` é acionada apenas quando o cliente muda de assunto, solicita outro serviço ou desiste da entrevista (limpando `pending_requested_limit` nesse último caso); se a mudança for pedida para depois do resultado na mesma mensagem, o especialista executa sua ferramenta antes do handoff para que a Triagem inclua o resultado na resposta.

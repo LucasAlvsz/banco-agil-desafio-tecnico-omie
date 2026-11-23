@@ -65,3 +65,13 @@ acoplamento circular com `agents`, garantindo um handler Langfuse independente p
 turno e ownership explícito de `flush()` no `ConversationRuntime`. Na F16, o executor
 de evals passou a verificar vazamentos via `contains_pii()` (`privacy.py`) e a ler o
 estado dos CSVs via `list_all()` nos repositórios concretos.
+
+## Atualização (suíte expandida e diagnósticos live)
+
+- **Data:** 2026-11-23
+
+A suíte declarativa em `evals/scenarios.json` foi expandida para 21 cenários (incluindo
+transições entre especialistas como `credito → triagem → cambio` e interrupções de
+entrevista), com suporte a `reply_patterns`, `reply_not_contains`, diagnósticos
+detalhados sem PII por falha de turno e filtros de CLI (`--scenario` e `--runs`) para
+validação seletiva nos modos offline e `live`.
