@@ -1,6 +1,7 @@
 import csv
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -31,12 +32,10 @@ ANSWERS = {
 
 @pytest.fixture
 def interview_files(data_dir):
+    seeds = Path(__file__).resolve().parents[1] / "data"
     clients = data_dir / "clientes.csv"
-    with clients.open("a", encoding="utf-8") as stream:
-        stream.write(f"{CARLOS},Carlos Mendes,1985-04-10,5000.00,720\n")
-    (data_dir / "score_limite.csv").write_text(
-        "score_minimo,limite_maximo\n0,1000.00\n300,3000.00\n500,7000.00\n"
-    )
+    for path in (clients, data_dir / "score_limite.csv"):
+        path.write_bytes((seeds / path.name).read_bytes())
     return clients, data_dir / "solicitacoes_aumento_limite.csv"
 
 

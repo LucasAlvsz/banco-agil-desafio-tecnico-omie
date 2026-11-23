@@ -281,7 +281,7 @@ def _redirect(
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Encaminha o cliente autenticado para consulta ou aumento de limite de crédito."""
+    """Continua o atendimento sobre crédito após a autenticação do cliente."""
     return _redirect(runtime, "credito")
 
 
@@ -299,10 +299,7 @@ def redirecionar_para_cambio(runtime: ToolRuntime[None, ConversationState]) -> C
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Retoma a triagem.
-
-    Use se o cliente mudar de assunto, pedir outro serviço ou desistir da entrevista.
-    """
+    """Retoma a triagem quando o cliente muda de assunto ou conclui o tópico atual."""
     if runtime.state.get("active_agent") == "entrevista":
         return _tool_result(
             runtime,
