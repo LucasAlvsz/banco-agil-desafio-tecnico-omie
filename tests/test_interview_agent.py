@@ -460,8 +460,8 @@ def test_interview_answers_preserve_the_rejected_amount_without_reopening_the_re
     assert turn(graph, "sim por favor").active_agent == "entrevista"
     handoff = tool_messages(graph)["interview"]
     assert handoff.text == (
-        "Entrevista de crédito iniciada. Colete os cinco indicadores financeiros antes de chamar "
-        "calcular_e_atualizar_score."
+        "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores financeiros reais "
+        "antes de concluir a avaliação, sem inventar dados e sem sair da entrevista."
     )
     assert model.calls[-1]["messages"][-1] == handoff
     assert_private(handoff.model_dump_json())
@@ -555,8 +555,8 @@ def test_leaving_interview_without_a_new_request_stays_in_triage(
     assert all(invocation["tools"] is not None for invocation in model.calls)
     handoff = tool_messages(graph)["back"]
     assert handoff.text == (
-        "Entrevista de crédito interrompida antes da conclusão. Atenda apenas a intenção atual "
-        "do cliente, sem reabrir pedidos já rejeitados."
+        "Entrevista de crédito interrompida antes da conclusão. Retomando a triagem para "
+        "atender apenas a intenção atual do cliente."
     )
     assert model.calls[-1]["messages"][-1] == handoff
     assert_private(handoff.model_dump_json(), result.model_dump_json())

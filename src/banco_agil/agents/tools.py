@@ -67,7 +67,11 @@ def build_triage_tools(credit_service: CreditService) -> list[BaseTool]:
     def autenticar_cliente(
         cpf: str, data_nascimento: str, runtime: ToolRuntime[None, ConversationState]
     ) -> Command[Any]:
-        """Verifica a identidade do cliente pelo CPF e pela data de nascimento."""
+        """Verifica a identidade do cliente pelo CPF e pela data de nascimento informados.
+
+        Não chame sem ambos os campos informados pelo cliente; nunca envie valores vazios ou
+        fictícios.
+        """
         if has_authenticated_client(runtime.state):
             return _tool_result(runtime, "O cliente já está autenticado.")
         try:
@@ -183,7 +187,10 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
         tem_dividas: str | StrictBool,
         runtime: ToolRuntime[None, ConversationState],
     ) -> Command[Any]:
-        """Recalcula e atualiza o score do cliente autenticado com os cinco dados da entrevista."""
+        """Recalcula e atualiza o score do cliente.
+
+        Use somente após o cliente informar os cinco dados reais da entrevista.
+        """
         if isinstance(auth := _require_authenticated_client(runtime), Command):
             return auth
         cpf = auth
@@ -213,7 +220,8 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
             )
         return _tool_result(
             runtime,
-            f"Novo score: {client.score}. Informe o novo score e retome o atendimento de crédito.",
+            f"Novo score: {client.score}. Responda em texto ao cliente informando o novo score "
+            "e retome o atendimento de crédito sem acionar ferramentas agora.",
             active_agent="credito",
         )
 
@@ -270,8 +278,8 @@ def _redirect(
         return auth
     messages = {
         "entrevista": (
-            "Entrevista de crédito iniciada. Colete os cinco indicadores financeiros antes de "
-            "chamar calcular_e_atualizar_score."
+            "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores financeiros "
+            "reais antes de concluir a avaliação, sem inventar dados e sem sair da entrevista."
         ),
         "credito": "Atendimento de crédito ativo. Atenda apenas a solicitação atual do cliente.",
         "cambio": "Atendimento de câmbio ativo. Consulte a cotação solicitada pelo cliente.",
@@ -281,7 +289,10 @@ def _redirect(
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Continua o atendimento sobre crédito após a autenticação do cliente."""
+    """Encaminha o cliente autenticado para consulta ou aumento de limite de crédito.
+
+    Não use para consulta isolada de score.
+    """
     return _redirect(runtime, "credito")
 
 
@@ -299,12 +310,16 @@ def redirecionar_para_cambio(runtime: ToolRuntime[None, ConversationState]) -> C
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Retoma a triagem quando o cliente muda de assunto ou conclui o tópico atual."""
+    """Retoma a triagem somente quando o cliente muda de assunto, pede outro serviço ou desiste.
+
+    Não chame apenas por o cliente informar valores em reais, renda, despesas, emprego,
+    dependentes ou dívidas durante a entrevista.
+    """
     if runtime.state.get("active_agent") == "entrevista":
         return _tool_result(
             runtime,
-            "Entrevista de crédito interrompida antes da conclusão. Atenda apenas a intenção "
-            "atual do cliente, sem reabrir pedidos já rejeitados.",
+            "Entrevista de crédito interrompida antes da conclusão. Retomando a triagem para "
+            "atender apenas a intenção atual do cliente.",
             active_agent="triagem",
             pending_requested_limit=None,
         )

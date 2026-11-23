@@ -98,7 +98,8 @@ score_final = round(max(0, min(1000, score_bruto)))
 - Confirmada a submissão, um **novo** pedido é registrado em `solicitacoes_aumento_limite.csv`.
 
 ### Encerramento de Tópico vs. Encerramento de Conversa
-- Ao concluir um assunto específico (ex.: apresentar cotação de câmbio ou consulta de limite), o agente encerra apenas o tópico com mensagem amigável, pergunta se pode ajudar em algo mais e devolve o controle à Triagem (mantendo o cliente autenticado).
+- Ao concluir um assunto específico, como uma consulta de limite de crédito ou uma cotação de câmbio, o especialista encerra o tópico com uma mensagem amigável e pergunta se pode ajudar em algo mais.
+- O controle volta à Triagem quando o cliente muda de assunto ou pede outro serviço. A autenticação é preservada. Se o cliente pedir essa mudança para depois do resultado na mesma mensagem, o especialista obtém o resultado antes de devolver o controle, e a Triagem o inclui na resposta.
 - A conversa inteira só é finalizada quando o cliente indica que deseja encerrar (acionando a ferramenta global de encerramento) ou após a 3ª falha consecutiva de autenticação.
 
 ### Consulta de Câmbio

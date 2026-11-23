@@ -65,12 +65,12 @@ O turno termina quando o agente responde sem chamar ferramentas. Após encerrame
 
 | Agente | Ferramentas no próprio `ToolNode` | Transições |
 | --- | --- | --- |
-| Triagem | `autenticar_cliente`, `redirecionar_para_credito`, `redirecionar_para_cambio` | Encaminha conforme o assunto após autenticar. |
-| Crédito | `consultar_limite`, `solicitar_aumento_limite`, `redirecionar_para_entrevista` | Oferece entrevista em caso de rejeição e encaminha se o cliente aceitar. |
+| Triagem | `autenticar_cliente`, `redirecionar_para_credito`, `redirecionar_para_cambio` | Após autenticar, encaminha consultas e aumentos de limite de crédito para Crédito e consultas de cotação para Câmbio. |
+| Crédito | `consultar_limite`, `solicitar_aumento_limite`, `redirecionar_para_entrevista` | Oferece entrevista em caso de rejeição e encaminha se o cliente aceitar. Ao concluir o tópico, pergunta se pode ajudar em algo mais. |
 | Entrevista | `calcular_e_atualizar_score` | Volta ao crédito após salvar o score, preservando o valor desejado. |
-| Câmbio | `consultar_cotacao` | Informa a cotação em BRL e devolve à triagem ao concluir o assunto. |
+| Câmbio | `consultar_cotacao` | Informa a cotação em BRL e pergunta se pode ajudar em algo mais. |
 
-Todos os agentes têm `encerrar_atendimento`; os três especialistas também têm `voltar_para_triagem`, preservando a autenticação.
+Todos os agentes têm `encerrar_atendimento`. Os especialistas usam `voltar_para_triagem` quando o cliente muda de assunto ou pede outro serviço. A Entrevista também usa a ferramenta se o cliente desistir da entrevista. A autenticação é preservada ao voltar à Triagem.
 
 ### Serviços e fronteira de segurança
 
