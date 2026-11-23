@@ -209,7 +209,7 @@ Defina `LLM_MODEL` (`provedor/modelo`) e a chave correspondente em `.env` (exemp
 
 | Configuração | Padrão e uso |
 | --- | --- |
-| `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS` | `groq/openai/gpt-oss-120b`, `0.1`, `45` s. |
+| `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_REASONING_EFFORT`, `LLM_TIMEOUT_SECONDS` | `groq/openai/gpt-oss-120b`, `0.1`, vazio (`none`/`minimal`/`low`/`medium`/`high`, opcional; `drop_params=True` descarta `temperature` em modelos de *reasoning* quando não suportada), `45` s. |
 | `DATA_DIR` | `data` (pode apontar para uma cópia gravável em testes manuais). |
 | `API_BASE_URL`, `API_TIMEOUT_SECONDS` | Vazio para modo direto; timeout HTTP de `60` s. |
 | `MCP_EXCHANGE_TRANSPORT`, `MCP_EXCHANGE_URL`, `EXCHANGE_TIMEOUT_SECONDS` | `inmemory` (ou `stdio` / `streamable_http` com URL obrigatória); timeout de `8` s por provedor. |

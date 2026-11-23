@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+type ReasoningEffort = Literal["none", "minimal", "low", "medium", "high"]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -13,6 +15,7 @@ class Settings(BaseSettings):
 
     llm_model: str = "groq/openai/gpt-oss-120b"
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    llm_reasoning_effort: ReasoningEffort | None = None
     llm_timeout_seconds: float = Field(default=45.0, gt=0.0)
     exchange_timeout_seconds: float = Field(default=8.0, gt=0.0)
     mcp_exchange_transport: Literal["inmemory", "stdio", "streamable_http"] = "inmemory"
@@ -32,6 +35,14 @@ class Settings(BaseSettings):
     langfuse_secret_key: SecretStr | None = None
     langfuse_base_url: str | None = None
     langfuse_host: str | None = Field(default=None, exclude=True, repr=False)
+
+    @field_validator("llm_reasoning_effort", mode="before")
+    @classmethod
+    def normalize_reasoning_effort(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
+        return value
 
     @field_validator("llm_model")
     @classmethod

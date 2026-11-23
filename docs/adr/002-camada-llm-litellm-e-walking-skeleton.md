@@ -102,3 +102,18 @@ No modo direto, **Nova conversa** reutiliza o `LocalChatClient` e o
 O runtime remove os checkpoints da thread anterior do `InMemorySaver` com
 `delete_thread(thread_id)` para liberar memória e chama `flush()` na observabilidade
 que ele possui para encaminhar os traces do Atendimento anterior.
+
+## Atualização (compatibilidade com modelos de *reasoning*)
+
+- **Data:** 2026-11-22
+
+`create_chat_model` passa `model_kwargs={"drop_params": True}` ao `ChatLiteLLM` e
+aceita `LLM_REASONING_EFFORT` opcional (`none`, `minimal`, `low`, `medium`, `high`).
+Sem `LLM_REASONING_EFFORT=none`, modelos de *reasoning* que rejeitam `temperature`
+customizada (ex.: `openai/gpt-6-luna`, `openai/gpt-5-mini`, `openai/o4-mini`) têm o
+parâmetro descartado pelo LiteLLM (e, no `gpt-6-luna` com tools, o LiteLLM faz ponte
+para `/v1/responses`), evitando `UnsupportedParamsError` sem exigir alterações no
+grafo. A faixa de valores aceita em `Settings` foi restrita ao subconjunto aceito
+sem erro pelos adaptadores do LiteLLM com `drop_params=True` nos provedores
+documentados (evitando `UnsupportedParamsError` no Gemini, que rejeita `xhigh` e
+`max`; níveis não suportados por um modelo específico são descartados).
