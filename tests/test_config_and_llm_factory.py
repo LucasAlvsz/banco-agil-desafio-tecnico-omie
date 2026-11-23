@@ -105,6 +105,22 @@ def test_empty_credentials_are_not_exported():
     assert all(field.upper() not in os.environ for field in SECRET_FIELDS)
 
 
+@pytest.mark.parametrize("url", [None, " "])
+def test_mcp_exchange_url_is_required_even_without_settings_validation(url):
+    settings = Settings.model_construct(mcp_exchange_url=url)
+    with pytest.raises(
+        ValueError, match=r"^Configure MCP_EXCHANGE_URL para usar streamable_http\.$"
+    ):
+        settings.resolve_mcp_exchange_url()
+
+
+def test_mcp_exchange_url_resolves_validated_url():
+    settings = Settings(
+        mcp_exchange_transport="streamable_http", mcp_exchange_url="http://localhost:8001/mcp/"
+    )
+    assert settings.resolve_mcp_exchange_url() == "http://localhost:8001/mcp"
+
+
 def test_network_is_blocked():
     with socket.socket() as connection, pytest.raises(AssertionError, match="Rede proibida"):
         connection.connect(("127.0.0.1", 80))
