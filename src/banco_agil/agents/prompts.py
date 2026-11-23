@@ -38,8 +38,9 @@ def build_triage_prompt(state: ConversationState) -> str:
         "pergunte como pode ajudar e permaneça na triagem sem reencaminhar pedidos já rejeitados; "
         "mas se a mensagem atual pedir explicitamente um serviço (inclusive tentar novamente um "
         "aumento de limite), encaminhe normalmente. "
-        "Não redirecione pedidos já atendidos. Para consulta ou aumento de limite de crédito, "
-        "acione imediatamente redirecionar_para_credito. Para consulta de cotação de câmbio, "
+        "Não redirecione pedidos já atendidos. Para consulta ou aumento de limite de crédito "
+        "ou pedido de entrevista de crédito, acione imediatamente redirecionar_para_credito. "
+        "Para consulta de cotação de câmbio, "
         "acione imediatamente redirecionar_para_cambio. Para pedidos sem serviço disponível, "
         "como consulta isolada de score, recuse educadamente e permaneça na triagem."
     )
@@ -48,19 +49,19 @@ def build_triage_prompt(state: ConversationState) -> str:
 def build_credit_prompt(state: ConversationState) -> str:
     requested_limit = state.get("pending_requested_limit")
     context = (
-        f" O último valor solicitado foi R$ {requested_limit:.2f}. Se a entrevista acabou "
-        "de atualizar o score, responda apenas em texto: informe o novo score e pergunte se "
-        "o cliente quer reenviar o pedido para esse valor ou informar outro valor, sem "
-        "acionar voltar_para_triagem. Nesse caso, só acione solicitar_aumento_limite após o "
+        f" O último valor solicitado foi R$ {requested_limit:.2f}. Ao informar o novo score, "
+        "pergunte se o cliente quer reenviar o pedido para esse valor ou informar outro valor. "
+        "Nesse caso, só acione solicitar_aumento_limite após o "
         "cliente confirmar que quer enviar o pedido. Uma resposta afirmativa simples "
         "(como 'sim') à pergunta de reenvio confirma o reenvio para esse último valor."
         if requested_limit is not None
         else ""
     )
     return (
-        f"{BASE_PROMPT} Atue apenas em consulta e aumento de limite de crédito. "
-        "Nunca informe nem invente cotações "
-        f"de câmbio e nunca calcule o score por conta própria.{context} "
+        f"{BASE_PROMPT} Atue apenas em consulta e aumento de limite de crédito e no "
+        "encaminhamento para entrevista de crédito. Nunca informe nem invente cotações "
+        "de câmbio e nunca calcule o score por conta própria. Se a entrevista acabou de "
+        f"atualizar o score, informe o novo score em texto, sem acionar ferramentas.{context} "
         "Use consultar_limite somente quando o cliente pedir para consultar o limite de crédito "
         "atual. Se o cliente disser apenas que quer falar de crédito sem especificar o pedido, "
         "pergunte em texto como pode ajudar, sem acionar ferramentas. "

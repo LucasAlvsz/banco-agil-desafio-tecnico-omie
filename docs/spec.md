@@ -14,8 +14,8 @@ Sistema multiagente conversacional para atendimento digital ao cliente do **Banc
 
 ## 2. Agentes e Responsabilidades
 
-1. **Agente de Triagem:** porta de entrada do atendimento. Recepciona o cliente, coleta CPF e data de nascimento, autentica contra `clientes.csv` e direciona para o especialista adequado **somente após autenticação bem-sucedida**. Após 3 falhas consecutivas de autenticação, informa de forma cordial e encerra o atendimento.
-2. **Agente de Crédito:** consulta o limite de crédito disponível e processa solicitações de aumento de limite (registrando em `solicitacoes_aumento_limite.csv` e validando contra `score_limite.csv`). Em caso de rejeição, oferece redirecionamento ao Agente de Entrevista de Crédito.
+1. **Agente de Triagem:** porta de entrada do atendimento. Recepciona o cliente, coleta CPF e data de nascimento, autentica contra `clientes.csv` e direciona para o especialista adequado **somente após autenticação bem-sucedida**. Encaminha pedidos de Entrevista de Crédito ao Agente de Crédito. Após 3 falhas consecutivas de autenticação, informa de forma cordial e encerra o atendimento.
+2. **Agente de Crédito:** consulta o limite de crédito disponível e processa solicitações de aumento de limite (registrando em `solicitacoes_aumento_limite.csv` e validando contra `score_limite.csv`). Oferece a Entrevista de Crédito após rejeitar uma Solicitação de Aumento de Limite. Encaminha o Cliente ao Agente de Entrevista de Crédito quando ele aceita a oferta ou solicita uma entrevista por iniciativa própria.
 3. **Agente de Entrevista de Crédito:** conduz entrevista conversacional estruturada coletando 5 indicadores financeiros, calcula o novo score (`0..1000`), atualiza `clientes.csv` e retorna ao Agente de Crédito.
 4. **Agente de Câmbio:** consulta cotações de moedas em tempo real via API externa estruturada, apresenta a cotação ao cliente e encerra o tópico de cotação com mensagem amigável.
 

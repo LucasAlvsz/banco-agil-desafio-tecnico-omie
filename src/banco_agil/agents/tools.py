@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from math import isfinite
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AnyMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command, interrupt
@@ -26,19 +26,30 @@ from banco_agil.domain.services import CreditService
 logger = logging.getLogger(__name__)
 MAX_AUTH_ATTEMPTS = 3
 _HANDOFF_EXTRA = "handoff"
-_INTERVIEW_STARTED_PREFIX = "Entrevista de crédito iniciada."
-_SCORE_UPDATED_PREFIX = "Novo score:"
+type _InterviewEvent = Literal["interview_started", "score_updated"]
+_LEGACY_INTERVIEW_RESULTS: dict[str, tuple[_InterviewEvent, str]] = {
+    "redirecionar_para_entrevista": ("interview_started", "Entrevista de crédito iniciada."),
+    "calcular_e_atualizar_score": ("score_updated", "Novo score:"),
+}
 
 
 def _tool_result(
-    runtime: ToolRuntime[None, ConversationState], content: str, **updates: object
+    runtime: ToolRuntime[None, ConversationState],
+    content: str,
+    *,
+    interview_event: _InterviewEvent | None = None,
+    **updates: object,
 ) -> Command[Any]:
     if runtime.tool_call_id is None:
         raise ValueError("Identificador da ferramenta ausente")
     return Command(
         update={
             **updates,
-            "messages": [ToolMessage(content=content, tool_call_id=runtime.tool_call_id)],
+            "messages": [
+                ToolMessage(
+                    content=content, tool_call_id=runtime.tool_call_id, artifact=interview_event
+                )
+            ],
         }
     )
 
@@ -183,31 +194,26 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
 
 
 def _needs_fresh_interview_answers(messages: Sequence[AnyMessage]) -> bool:
-    call_names: dict[str, str] = {}
-    interview_starts: list[int] = []
-    prior_score_updated = False
-    for index, message in enumerate(messages):
-        if isinstance(message, AIMessage):
-            for call in message.tool_calls:
-                if call_id := call.get("id"):
-                    call_names[call_id] = call["name"]
+    interview_started = False
+    awaiting_answers = False
+    for message in messages:
+        if isinstance(message, HumanMessage):
+            awaiting_answers = False
         elif isinstance(message, ToolMessage) and message.status != "error":
-            name = call_names.get(message.tool_call_id)
-            # Persisted business failures can also have the default success status.
-            if name == redirecionar_para_entrevista.name and message.text.startswith(
-                _INTERVIEW_STARTED_PREFIX
+            event = message.artifact
+            # Older checkpoints record successful interview events only in tool result text.
+            if event is None and (
+                legacy_result := _LEGACY_INTERVIEW_RESULTS.get(message.name or "")
             ):
-                interview_starts.append(index)
-            elif name == "calcular_e_atualizar_score" and message.text.startswith(
-                _SCORE_UPDATED_PREFIX
-            ):
-                prior_score_updated = True
-
-    if not interview_starts or not (prior_score_updated or len(interview_starts) > 1):
-        return False
-    return not any(
-        isinstance(message, HumanMessage) for message in messages[interview_starts[-1] + 1 :]
-    )
+                legacy_event, prefix = legacy_result
+                if message.text.startswith(prefix):
+                    event = legacy_event
+            if event == "interview_started":
+                awaiting_answers = interview_started
+                interview_started = True
+            elif event == "score_updated":
+                interview_started = True
+    return awaiting_answers
 
 
 def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
@@ -261,8 +267,9 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
             )
         return _tool_result(
             runtime,
-            f"{_SCORE_UPDATED_PREFIX} {client.score}. Responda em texto ao cliente informando "
+            f"Novo score: {client.score}. Responda em texto ao cliente informando "
             "o novo score e retome o atendimento de crédito sem acionar ferramentas agora.",
+            interview_event="score_updated",
             active_agent="credito",
         )
 
@@ -319,19 +326,24 @@ def _redirect(
         return auth
     messages = {
         "entrevista": (
-            f"{_INTERVIEW_STARTED_PREFIX} Colete do cliente os cinco indicadores "
+            "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores "
             "financeiros reais desta entrevista antes de concluir a avaliação, sem reutilizar "
             "dados de entrevistas anteriores, sem inventar dados e sem sair da entrevista."
         ),
         "credito": "Atendimento de crédito ativo. Atenda apenas a solicitação atual do cliente.",
         "cambio": "Atendimento de câmbio ativo. Consulte a cotação solicitada pelo cliente.",
     }
-    return _tool_result(runtime, messages[agent], active_agent=agent)
+    return _tool_result(
+        runtime,
+        messages[agent],
+        active_agent=agent,
+        interview_event="interview_started" if agent == "entrevista" else None,
+    )
 
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Encaminha o cliente autenticado para consulta ou aumento de limite de crédito.
+    """Encaminha o cliente autenticado para consulta, aumento de limite ou entrevista de crédito.
 
     Não use para consulta isolada de score.
     """

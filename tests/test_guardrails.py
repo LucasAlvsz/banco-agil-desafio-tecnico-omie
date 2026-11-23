@@ -399,7 +399,8 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
         (
             build_credit_prompt,
             (
-                "Atue apenas em consulta e aumento de limite de crédito",
+                "Atue apenas em consulta e aumento de limite de crédito e no encaminhamento "
+                "para entrevista de crédito",
                 "Nunca informe nem invente cotações de câmbio",
                 "nunca calcule o score por conta própria",
                 "pedido explícito de aumento de limite na mensagem atual",
@@ -458,8 +459,8 @@ def test_authenticated_triage_routes_only_available_services():
     prompt = build_triage_prompt({"messages": [], "authenticated": True, "client_cpf": CPF})
 
     assert (
-        "consulta ou aumento de limite de crédito, acione imediatamente redirecionar_para_credito"
-        in prompt
+        "consulta ou aumento de limite de crédito ou pedido de entrevista de crédito, "
+        "acione imediatamente redirecionar_para_credito" in prompt
     )
     assert "consulta de cotação de câmbio, acione imediatamente redirecionar_para_cambio" in prompt
     assert "consulta isolada de score, recuse educadamente e permaneça na triagem" in prompt

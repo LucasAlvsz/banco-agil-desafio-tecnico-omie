@@ -148,23 +148,51 @@ def test_score_updates_only_the_authenticated_client_and_hands_off_in_the_same_t
 ALL_ANSWERS_MESSAGE = "Ganho R$ 6.000, sou CLT, gasto R$ 2.000 e não tenho dependentes nem dívidas."
 
 
-def test_first_interview_can_use_indicators_in_the_opening_message(start_interview, credit_service):
+@pytest.mark.parametrize("initial_agent", ["triagem", "credito"])
+def test_first_interview_can_use_indicators_in_the_opening_message(
+    start_interview, credit_service, interview_files, initial_agent
+):
+    triage_steps = []
+    if initial_agent == "triagem":
+        triage_steps.append(tool_step(call("redirecionar_para_credito", "credit")))
     graph, _ = start_interview(
+        *triage_steps,
         tool_step(call("redirecionar_para_entrevista", "first-interview")),
         tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
         AIMessage(content="Seu novo score é 590."),
-        active_agent="credito",
+        active_agent=initial_agent,
     )
 
-    result = turn(graph, f"Quero fazer a entrevista. {ALL_ANSWERS_MESSAGE}")
+    result = turn(graph, f"Quero fazer uma entrevista de crédito. {ALL_ANSWERS_MESSAGE}")
 
-    assert result.telemetry.agent_route == ("credito", "entrevista", "credito")
+    route = ("credito", "entrevista", "credito")
+    if initial_agent == "triagem":
+        route = ("triagem", *route)
+    assert result.telemetry.agent_route == route
+    assert result.reply == "Seu novo score é 590."
+    assert result.pending_confirmation is None
     assert credit_service.get_client(ANA).score == 590
+    _, requests = interview_files
+    assert csv_rows(requests) == []
 
 
-@pytest.mark.parametrize("first_interview", ["completed", "interrupted", "already_started"])
+@pytest.mark.parametrize(
+    ("first_interview", "legacy_checkpoint"),
+    [
+        ("completed", False),
+        ("interrupted", False),
+        ("already_started", False),
+        ("completed", True),
+        ("interrupted", True),
+    ],
+)
 def test_second_interview_requires_a_new_client_turn_before_scoring(
-    start_interview, interview_files, credit_service, monkeypatch, first_interview
+    start_interview,
+    interview_files,
+    credit_service,
+    monkeypatch,
+    first_interview,
+    legacy_checkpoint,
 ):
     clients, requests = interview_files
     first_steps = []
@@ -178,7 +206,6 @@ def test_second_interview_requires_a_new_client_turn_before_scoring(
             tool_step(call("voltar_para_triagem", "back")),
             AIMessage(content="Tudo bem. Como posso ajudar?"),
             tool_step(call("redirecionar_para_credito", "credit")),
-            AIMessage(content="Posso ajudar com seu limite de crédito."),
         ]
     else:
         first_steps += [
@@ -200,9 +227,20 @@ def test_second_interview_requires_a_new_client_turn_before_scoring(
         assert (
             turn(graph, "Ganho R$ 6.000, mas prefiro parar a entrevista.").active_agent == "triagem"
         )
-        assert turn(graph, "Quero falar do meu limite.").active_agent == "credito"
     else:
         assert turn(graph, ALL_ANSWERS_MESSAGE).active_agent == "credito"
+
+    if legacy_checkpoint:
+        legacy_texts = {
+            "first-interview": "Entrevista de crédito iniciada. Colete os cinco indicadores.",
+            "first-score": "Novo score: 590. Responda em texto ao cliente.",
+        }
+        messages = [
+            message.model_copy(update={"artifact": None, "content": legacy_texts[call_id]})
+            for call_id, message in tool_messages(graph).items()
+            if call_id in legacy_texts
+        ]
+        graph.update_state(CONFIG, {"messages": messages}, as_node="credito")
 
     recalculate = Mock(wraps=credit_service.recalculate_score)
     monkeypatch.setattr(credit_service, "recalculate_score", recalculate)
@@ -211,6 +249,8 @@ def test_second_interview_requires_a_new_client_turn_before_scoring(
     reentry = turn(graph, "Quero fazer outra entrevista de crédito.")
 
     assert reentry.active_agent == "entrevista"
+    if first_interview == "interrupted":
+        assert reentry.telemetry.agent_route == ("triagem", "credito", "entrevista")
     assert "Pergunte ao cliente os cinco indicadores financeiros atualizados" in (
         tool_messages(graph)["stale-score"].text
     )

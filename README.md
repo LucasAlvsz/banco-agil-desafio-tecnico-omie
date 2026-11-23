@@ -6,7 +6,7 @@ Atendimento bancário digital multiagente para autenticação, consulta e aument
 
 O LLM conduz a conversa e aciona ferramentas; código determinístico valida identidade e autorização, calcula o score, avalia pedidos e persiste os dados. Consulte a [especificação do produto](docs/spec.md) para regras e contratos e o [glossário](GLOSSARY.md) para o vocabulário de domínio.
 
-**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **572 testes** (99% de cobertura), `mypy --strict` e **22/22 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
+**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **575 testes** (99% de cobertura), `mypy --strict` e **22/22 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
 
 ## Arquitetura do sistema
 
@@ -65,7 +65,7 @@ O turno termina quando o agente responde sem chamar ferramentas. Após encerrame
 
 | Agente | Ferramentas no próprio `ToolNode` | Transições |
 | --- | --- | --- |
-| Triagem | `autenticar_cliente`, `redirecionar_para_credito`, `redirecionar_para_cambio` | Após autenticar, encaminha consultas e aumentos de limite de crédito para Crédito e consultas de cotação para Câmbio. |
+| Triagem | `autenticar_cliente`, `redirecionar_para_credito`, `redirecionar_para_cambio` | Após autenticar, encaminha consultas e aumentos de limite e pedidos de Entrevista de Crédito para Crédito, e consultas de cotação para Câmbio. |
 | Crédito | `consultar_limite`, `solicitar_aumento_limite`, `redirecionar_para_entrevista` | Oferece entrevista em caso de rejeição e encaminha se o cliente aceitar ou pedir uma entrevista. Ao concluir o tópico, pergunta se pode ajudar em algo mais. |
 | Entrevista | `calcular_e_atualizar_score` | Volta ao crédito após salvar o score, preservando o valor desejado. |
 | Câmbio | `consultar_cotacao` | Informa a cotação em BRL e pergunta se pode ajudar em algo mais. |

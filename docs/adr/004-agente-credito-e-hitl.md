@@ -24,8 +24,9 @@ contém a ação, os dois valores e uma mensagem, todos serializáveis em JSON.
 
 Na retomada, o LangGraph reexecuta a etapa anterior à pausa. A persistência via
 `CreditService` ocorre após uma resposta estrutural com `approved` igual ao booleano
-`True`. O cancelamento encerra o pedido sem gravação. Um pedido confirmado e rejeitado
-preserva o valor desejado na sessão para uma possível reavaliação após a entrevista.
+`True`. O cancelamento da Confirmação de Aumento encerra o pedido sem gravação e limpa
+`pending_requested_limit`. Um pedido confirmado e rejeitado preserva o valor desejado
+para uma possível reavaliação após a Entrevista de Crédito.
 
 ### Pontos de confirmação no atendimento
 
