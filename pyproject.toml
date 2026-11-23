@@ -18,6 +18,7 @@ dependencies = [
     "langchain-litellm>=0.2.0",
     "langgraph>=1.0.0",
     "langfuse>=4.0.0,<5",
+    "langchain>=1.0.0,<2",
     "litellm>=1.60.0",
     "streamlit>=1.42.0",
     "mcp>=2.0.0,<3",

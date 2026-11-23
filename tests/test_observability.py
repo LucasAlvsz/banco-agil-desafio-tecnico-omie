@@ -258,6 +258,12 @@ def test_langfuse_disabled_does_not_import_sdk(monkeypatch):
     assert create_langfuse_observability(partial) is None
 
 
+def test_langfuse_callback_handler_imports_with_project_dependencies():
+    from langfuse.langchain import CallbackHandler
+
+    assert issubclass(CallbackHandler, BaseCallbackHandler)
+
+
 @pytest.fixture
 def langfuse_sdk(monkeypatch):
     sdk = ModuleType("langfuse")
