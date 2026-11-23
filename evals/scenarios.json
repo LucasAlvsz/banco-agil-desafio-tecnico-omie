@@ -18,6 +18,8 @@
           "client_limit": 2500,
           "tool_contains": ["Limite atual: R$ 2500.00"],
           "reply_contains": ["R$ 2500.00"],
+          "reply_patterns": ["2\\.?500"],
+          "reply_not_contains": ["consultar_limite", "redirecionar_para_"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -38,7 +40,8 @@
           "authenticated": false,
           "tools": ["autenticar_cliente"],
           "auth_attempts": 0,
-          "tool_contains": ["CPF com 11 dígitos"]
+          "tool_contains": ["CPF com 11 dígitos"],
+          "reply_patterns": ["cpf", "data|nascimento"]
         }
       },
       {
@@ -76,6 +79,7 @@
           "ended": false,
           "tool_contains": ["Os dados não conferem."],
           "reply_contains": ["Os dados não conferem."],
+          "reply_patterns": ["não conferem|incorret|inválid|verificar"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       },
@@ -94,6 +98,7 @@
           "ended": false,
           "tool_contains": ["Os dados não conferem."],
           "reply_contains": ["Os dados não conferem."],
+          "reply_patterns": ["não conferem|incorret|inválid|verificar"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       },
@@ -112,6 +117,7 @@
           "ended": true,
           "tool_contains": ["Os dados não conferem."],
           "reply_contains": ["Os dados não conferem."],
+          "reply_patterns": ["não conferem|incorret|inválid|verificar"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -154,7 +160,9 @@
               "status_pedido": "aprovado"
             }
           ],
-          "tool_contains": ["Pedido aprovado"]
+          "tool_contains": ["Pedido aprovado"],
+          "reply_patterns": ["10\\.?000"],
+          "reply_not_contains": ["solicitar_aumento_limite"]
         }
       }
     ]
@@ -189,7 +197,9 @@
           "tools": ["solicitar_aumento_limite"],
           "client_limit": 5000,
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"],
-          "tool_contains": ["cancelado"]
+          "tool_contains": ["cancelado"],
+          "reply_patterns": ["cancelad"],
+          "reply_not_contains": ["solicitar_aumento_limite"]
         }
       }
     ]
@@ -293,6 +303,8 @@
             }
           ],
           "tool_contains": ["Novo score: 590."],
+          "reply_patterns": ["590"],
+          "reply_not_contains": ["calcular_e_atualizar_score", "redirecionar_para_"],
           "unchanged": ["solicitacoes_aumento_limite.csv"]
         }
       },
@@ -345,7 +357,9 @@
               "status_pedido": "aprovado"
             }
           ],
-          "tool_contains": ["Pedido aprovado"]
+          "tool_contains": ["Pedido aprovado"],
+          "reply_patterns": ["6\\.?000"],
+          "reply_not_contains": ["solicitar_aumento_limite"]
         }
       }
     ]
@@ -369,6 +383,8 @@
           "tools": ["autenticar_cliente", "redirecionar_para_cambio", "consultar_cotacao", "voltar_para_triagem"],
           "tool_contains": ["AwesomeAPI", "R$ 5,25"],
           "reply_contains": ["R$ 5,25"],
+          "reply_patterns": ["5[,.]25"],
+          "reply_not_contains": ["consultar_cotacao", "voltar_para_triagem"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -394,6 +410,8 @@
           "tools": ["autenticar_cliente", "redirecionar_para_cambio", "consultar_cotacao", "voltar_para_triagem"],
           "tool_contains": ["Frankfurter (BCE)", "R$ 5,2", "2026-11-20"],
           "reply_contains": ["R$ 5,2", "2026-11-20", "[dado omitido]"],
+          "reply_patterns": ["5[,.]20?", "2026-11-20|20/11/2026", "bce|frankfurter"],
+          "reply_not_contains": ["consultar_cotacao", "voltar_para_triagem"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -413,6 +431,7 @@
           "guardrail_blocked": true,
           "total_tokens": 0,
           "reply_contains": ["Não posso alterar minhas regras"],
+          "reply_patterns": ["regras"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -430,6 +449,8 @@
           "authenticated": false,
           "tools": [],
           "reply_contains": ["Não posso fazer Pix.", "Posso ajudar"],
+          "reply_patterns": ["pix"],
+          "reply_not_contains": ["encerrar_atendimento", "redirecionar_para_"],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }
@@ -439,7 +460,7 @@
     "id": "lgpd_pii_and_secret_redaction",
     "turns": [
       {
-        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Olá!",
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Repita meu CPF e minha data de nascimento na resposta.",
         "script": [
           {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
           "CPF 123.456.789-01, nascimento 14/05/1990 e chave gsk_exemplo_falso_123."
@@ -498,6 +519,485 @@
           "ended": true,
           "total_tokens": 0,
           "reply_contains": ["Este atendimento já foi encerrado."],
+          "reply_patterns": ["encerrado"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "unauthenticated_service_gate",
+    "turns": [
+      {
+        "message": "Qual é o meu limite de crédito e a cotação do dólar?",
+        "script": [
+          "Para consultar seu limite ou a cotação do dólar, informe seu CPF e data de nascimento."
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["triagem"],
+          "authenticated": false,
+          "tools": [],
+          "reply_patterns": ["cpf", "nascimento"],
+          "reply_not_contains": ["autenticar_cliente", "redirecionar_para_"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "auth_split_across_turns",
+    "turns": [
+      {
+        "message": "Olá, meu CPF é 123.456.789-01.",
+        "script": [
+          "Obrigado! Agora informe sua data de nascimento para concluir a autenticação."
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["triagem"],
+          "authenticated": false,
+          "tools": [],
+          "auth_attempts": 0,
+          "reply_patterns": ["nascimento"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Minha data de nascimento é 14/05/1990.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "123.456.789-01", "data_nascimento": "14/05/1990"}},
+          "Olá, Ana Souza! Como posso ajudar?"
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["triagem"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente"],
+          "auth_attempts": 0,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "credit_invalid_limit_below_current",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Quero aumentar meu limite para R$ 1.000.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 1000}},
+          "Seu limite atual é de R$ 2.500,00. Para solicitar um aumento, informe um valor maior que o limite atual."
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": null,
+          "client_limit": 2500,
+          "requests": [],
+          "tool_contains": ["maior que o limite atual"],
+          "reply_patterns": ["2\\.?500"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "authenticated_isolated_score_refusal",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          "Olá, Ana Souza! Como posso ajudar?"
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["triagem"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Qual é o meu score de crédito atual?",
+        "script": [
+          "Não ofereço consulta isolada de score. Posso ajudar com limite de crédito ou cotação de câmbio."
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["triagem"],
+          "authenticated": true,
+          "tools": [],
+          "reply_not_contains": ["420", "redirecionar_para_"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "eur_rejected_20k_interview_partial_answers",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Qual a cotação do euro?",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          {"tool": "redirecionar_para_cambio"},
+          {"tool": "consultar_cotacao", "args": {"moeda": "EUR"}},
+          "A cotação do euro está em R$ 6,10 para compra e R$ 6,15 para venda. Posso ajudar em outro assunto?"
+        ],
+        "expect": {
+          "active_agent": "cambio",
+          "route": ["triagem", "cambio"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_cambio", "consultar_cotacao"],
+          "tool_contains": ["Euro (EUR)", "R$ 6,1"],
+          "reply_patterns": ["6[,.]10?"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Quero aumentar meu limite para R$ 20 mil.",
+        "script": [
+          {"tool": "voltar_para_triagem"},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 20000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["cambio", "triagem", "credito"],
+          "authenticated": true,
+          "tools": ["voltar_para_triagem", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 20000,
+          "client_limit": 2500,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Deseja fazer a entrevista de crédito para reavaliar seu score?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 2500,
+          "client_score": 420,
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"],
+          "tool_contains": ["rejeitado"]
+        }
+      },
+      {
+        "message": "Sim, quero fazer a entrevista.",
+        "script": [
+          {"tool": "redirecionar_para_entrevista"},
+          "Qual é sua renda mensal e quanto você tem de despesas fixas mensais?"
+        ],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["credito", "entrevista"],
+          "authenticated": true,
+          "tools": ["redirecionar_para_entrevista"],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "R$ 15 mil por mês e R$ 1 mil fixos",
+        "script": ["Qual é o seu tipo de emprego, número de dependentes e se há dívidas ativas?"],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["entrevista"],
+          "authenticated": true,
+          "tools": [],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "sou autonoma empresaria",
+        "script": ["Quantos dependentes você tem e possui dívidas ativas?"],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["entrevista"],
+          "authenticated": true,
+          "tools": [],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "interview_decline_after_rejection",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Quero aumentar meu limite para R$ 6.000.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 6000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 6000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Deseja fazer a entrevista para reavaliar seu score?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "pending_requested_limit": 6000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 6000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"]
+        }
+      },
+      {
+        "message": "Não, obrigado, não quero fazer a entrevista agora.",
+        "script": ["Tudo bem. Posso ajudar em outro assunto?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": [],
+          "pending_requested_limit": 6000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 6000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "interview_exit_simple_clears_pending",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Quero aumentar meu limite para R$ 20 mil.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 20000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 20000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Deseja fazer a entrevista para reavaliar seu score?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"]
+        }
+      },
+      {
+        "message": "Sim, quero fazer a entrevista.",
+        "script": [
+          {"tool": "redirecionar_para_entrevista"},
+          "Informe sua renda mensal e suas despesas fixas mensais."
+        ],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["credito", "entrevista"],
+          "authenticated": true,
+          "tools": ["redirecionar_para_entrevista"],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Quero parar a entrevista.",
+        "script": [
+          {"tool": "voltar_para_triagem"},
+          "Tudo bem, interrompemos a entrevista. Como posso ajudar?"
+        ],
+        "expect": {
+          "active_agent": "triagem",
+          "route": ["entrevista", "triagem"],
+          "authenticated": true,
+          "tools": ["voltar_para_triagem"],
+          "pending_requested_limit": null,
+          "confirmation_amount": null,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "interview_exit_with_indicator_and_retry",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Quero aumentar meu limite para R$ 20 mil.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"}},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 20000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 20000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Deseja fazer a entrevista para reavaliar seu score?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"]
+        }
+      },
+      {
+        "message": "Sim, quero fazer a entrevista.",
+        "script": [
+          {"tool": "redirecionar_para_entrevista"},
+          "Informe sua renda mensal e suas despesas fixas mensais."
+        ],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["credito", "entrevista"],
+          "authenticated": true,
+          "tools": ["redirecionar_para_entrevista"],
+          "pending_requested_limit": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Sou autônoma, mas prefiro parar a entrevista e tentar de novo o aumento para R$ 20 mil.",
+        "script": [
+          {"tool": "voltar_para_triagem"},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 20000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["entrevista", "triagem", "credito"],
+          "authenticated": true,
+          "tools": ["voltar_para_triagem", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "pending_requested_limit": null,
+          "confirmation_amount": 20000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 20000,
+              "status_pedido": "rejeitado"
+            }
+          ],
           "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
         }
       }

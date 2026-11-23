@@ -16,12 +16,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Avaliação das jornadas do Banco Ágil")
     parser.add_argument("--mode", choices=("offline", "live"), default="offline")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_SCENARIOS_PATH)
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        dest="scenarios",
+        help="Filtra por ID de cenário (pode ser repetido)",
+    )
+    parser.add_argument("--runs", type=int, default=1, help="Execuções por cenário")
     parser.add_argument("--json", action="store_true", help="Emite o relatório em JSON")
     args = parser.parse_args(argv)
     mode: Literal["offline", "live"] = args.mode
     configure_logging()
     try:
-        report = run_evals(mode=mode, scenarios_path=args.dataset)
+        report = run_evals(
+            mode=mode,
+            scenarios_path=args.dataset,
+            scenario_ids=args.scenarios,
+            runs=args.runs,
+        )
     except (OSError, ValueError, DomainError) as exc:
         message = f"Não foi possível executar a avaliação ({type(exc).__name__})."
         if args.json:

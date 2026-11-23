@@ -53,7 +53,7 @@ def test_dataset_and_offline_evals_are_complete_and_preserve_seeds(monkeypatch):
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
     original = {path: path.read_bytes() for path in DATA_DIR.glob("*.csv")}
     scenarios = load_scenarios()
-    assert len(scenarios) >= 12 and len(scenarios) == len({item.id for item in scenarios})
+    assert len(scenarios) >= 20 and len(scenarios) == len({item.id for item in scenarios})
     report = run_evals(settings=Settings(data_dir=DATA_DIR))
     assert report.total_scenarios == report.passed_scenarios == len(scenarios)
     assert report.pass_rate == report.route_accuracy == 1.0
@@ -103,7 +103,7 @@ def test_evals_detect_route_mismatch_and_pii_then_exit_one(
 def test_cli_table_json_and_invalid_dataset(capsys, tmp_path, isolated_logging):
     assert main([]) == 0
     table = capsys.readouterr().out
-    assert "Passaram 12/12" in table
+    assert "Passaram 20/20" in table
     assert "Rotas 100%" in table
     assert "Vazamentos de PII 0" in table
     assert "auth_and_credit_limit_query" in table
@@ -170,3 +170,141 @@ def test_live_flushes_if_execution_fails(monkeypatch, single_scenario, tmp_path)
             mode="live", scenarios_path=single_scenario(), settings=Settings(data_dir=tmp_path)
         )
     observability.flush.assert_called_once_with()
+
+
+def test_reply_patterns_forbidden_terms_and_diagnostics_run_in_live_mode(
+    monkeypatch, scripted_model, single_scenario
+):
+    path = single_scenario(
+        expect={
+            "route": ["credito"],
+            "reply_patterns": ["590", "2026-11-20"],
+            "reply_not_contains": ["voltar_para_triagem"],
+        }
+    )
+    monkeypatch.setattr(
+        "banco_agil.infrastructure.llm_factory.create_chat_model",
+        Mock(
+            return_value=scripted_model(
+                responses=[AIMessage(content="Chamei voltar_para_triagem sem informar o valor.")]
+            )
+        ),
+    )
+    monkeypatch.setattr(runner, "create_langfuse_observability", lambda settings: None)
+    report = run_evals(mode="live", scenarios_path=path)
+    assert report.failed_scenarios == 1
+    failures = report.scenarios[0].failures
+    assert any("rota (esperado=['credito'], obtido=['triagem'])" in item for item in failures)
+    assert any("padrões na resposta" in item and "590" in item for item in failures)
+    assert any(
+        "termos proibidos na resposta" in item and "voltar_para_triagem" in item
+        for item in failures
+    )
+
+
+def test_cli_supports_scenario_filtering_repeated_runs_and_validates_inputs(
+    capsys, single_scenario, isolated_logging
+):
+    assert (
+        main(
+            [
+                "--scenario",
+                "out_of_scope_refusal",
+                "--runs",
+                "2",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    report = EvalReport.model_validate_json(capsys.readouterr().out)
+    assert [item.id for item in report.scenarios] == [
+        "out_of_scope_refusal#1",
+        "out_of_scope_refusal#2",
+    ]
+    assert report.passed_scenarios == 2 and report.failed_scenarios == 0
+
+    assert main(["--scenario", "nao_existe", "--json"]) == 1
+    assert "ValueError" in json.loads(capsys.readouterr().out)["error"]
+    assert main(["--runs", "0", "--json"]) == 1
+    assert "ValueError" in json.loads(capsys.readouterr().out)["error"]
+
+    bad_regex = single_scenario(expect={"reply_patterns": ["[invalido"]})
+    assert main(["--dataset", str(bad_regex), "--json"]) == 1
+    assert "ValidationError" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_eur_fallback_mock_and_remaining_failure_diagnostics(tmp_path):
+    eur_fallback = {
+        "id": "eur_fallback",
+        "exchange": "fallback",
+        "turns": [
+            {
+                "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Cotação do euro?",
+                "script": [
+                    {
+                        "tool": "autenticar_cliente",
+                        "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"},
+                    },
+                    {"tool": "redirecionar_para_cambio"},
+                    {"tool": "consultar_cotacao", "args": {"moeda": "EUR"}},
+                    "Euro em R$ 6,05 (BCE, 2026-11-20).",
+                ],
+                "expect": {
+                    "active_agent": "cambio",
+                    "route": ["triagem", "cambio"],
+                    "authenticated": True,
+                    "tools": [
+                        "autenticar_cliente",
+                        "redirecionar_para_cambio",
+                        "consultar_cotacao",
+                    ],
+                    "tool_contains": ["Frankfurter (BCE)", "R$ 6,05", "2026-11-20"],
+                    "reply_patterns": ["6[,.]05", "2026-11-20"],
+                },
+            }
+        ],
+    }
+    diagnostics_case = {
+        "id": "diagnostics_detail",
+        "turns": [
+            {
+                "message": "Meu CPF é 12345678901, nasci em 14/05/1990.",
+                "script": [
+                    {
+                        "tool": "autenticar_cliente",
+                        "args": {"cpf": "12345678901", "data_nascimento": "14/05/1990"},
+                    },
+                    "Olá!",
+                    "extra não consumido",
+                ],
+                "expect": {
+                    "active_agent": "triagem",
+                    "route": ["triagem"],
+                    "authenticated": True,
+                    "tool_contains": ["ausente-tool"],
+                    "reply_contains": ["ausente-reply"],
+                    "requests": [
+                        {
+                            "cpf_cliente": "12345678901",
+                            "limite_atual": 2500,
+                            "novo_limite_solicitado": 6000,
+                            "status_pedido": "aprovado",
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    path = tmp_path / "extra.json"
+    path.write_text(json.dumps([eur_fallback, diagnostics_case]), encoding="utf-8")
+    report = run_evals(scenarios_path=path)
+    eur_result, diag_result = report.scenarios
+    assert eur_result.passed
+    assert not diag_result.passed
+    joined = "\n".join(diag_result.failures)
+    assert "resposta das ferramentas (ausentes=['ausente-tool'])" in joined
+    assert "resposta do roteiro (ausentes=['ausente-reply'])" in joined
+    assert "roteiro consumido (restantes=1)" in joined
+    assert "pedidos no CSV (esperado=[(6000.0, 'aprovado')], obtido=[])" in joined
+    assert "12345678901" not in joined

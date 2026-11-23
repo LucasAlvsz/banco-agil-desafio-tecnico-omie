@@ -1,6 +1,7 @@
+import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from banco_agil.agents.state import AgentName
 from banco_agil.domain.models import LimitIncreaseStatus
@@ -37,10 +38,22 @@ class EvalExpectations(EvalModel):
     tools: tuple[str, ...] | None = None
     tool_contains: tuple[str, ...] = ()
     reply_contains: tuple[str, ...] = ()
+    reply_patterns: tuple[str, ...] = ()
+    reply_not_contains: tuple[str, ...] = ()
     requests: tuple[EvalLimitRequest, ...] = ()
     unchanged: tuple[SeedFile, ...] = ()
     client_limit: float | None = Field(default=None, ge=0)
     client_score: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("reply_patterns")
+    @classmethod
+    def validate_reply_patterns(cls, patterns: tuple[str, ...]) -> tuple[str, ...]:
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"Expressão regular inválida: {pattern}") from exc
+        return patterns
 
 
 class EvalTurn(EvalModel):

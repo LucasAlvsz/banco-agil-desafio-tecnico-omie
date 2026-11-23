@@ -1,4 +1,5 @@
 import os
+import re
 from collections import deque
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -84,28 +85,42 @@ def load_scenarios(path: Path = DEFAULT_SCENARIOS_PATH) -> list[EvalScenario]:
 
 
 def _exchange_provider(scenario: EvalScenario, timeout: float) -> McpExchangeRateProvider:
+    awesome_quotes = {
+        f"{AWESOME_URL}/USD-BRL": {
+            "USDBRL": {
+                "name": "Dólar Americano/Real Brasileiro",
+                "bid": "5.25",
+                "ask": "5.30",
+                "create_date": "2026-11-21 10:30:00",
+            }
+        },
+        f"{AWESOME_URL}/EUR-BRL": {
+            "EURBRL": {
+                "name": "Euro/Real Brasileiro",
+                "bid": "6.10",
+                "ask": "6.15",
+                "create_date": "2026-11-21 10:30:00",
+            }
+        },
+    }
+    frankfurter_rates = {"USD": 5.20, "EUR": 6.05}
+
     def respond(request: httpx.Request) -> httpx.Response:
         url = str(request.url.copy_with(query=None))
-        if url == f"{AWESOME_URL}/USD-BRL":
+        if url in awesome_quotes:
             if scenario.exchange == "fallback":
                 raise httpx.ReadTimeout("Timeout simulado", request=request)
-            return httpx.Response(
-                200,
-                json={
-                    "USDBRL": {
-                        "name": "Dólar Americano/Real Brasileiro",
-                        "bid": "5.25",
-                        "ask": "5.30",
-                        "create_date": "2026-11-21 10:30:00",
-                    }
-                },
-            )
+            return httpx.Response(200, json=awesome_quotes[url])
+        base = request.url.params.get("base")
         if (
             url == FRANKFURTER_URL
             and scenario.exchange == "fallback"
-            and request.url.params == httpx.QueryParams(base="USD", symbols="BRL")
+            and base in frankfurter_rates
+            and request.url.params == httpx.QueryParams(base=base, symbols="BRL")
         ):
-            return httpx.Response(200, json={"date": "2026-11-20", "rates": {"BRL": 5.20}})
+            return httpx.Response(
+                200, json={"date": "2026-11-20", "rates": {"BRL": frankfurter_rates[base]}}
+            )
         return httpx.Response(404)
 
     return McpExchangeRateProvider.in_memory(
@@ -124,12 +139,21 @@ def _aggregate_cost(costs: Sequence[float | None]) -> float | None:
     return None if None in costs else sum(cost for cost in costs if cost is not None)
 
 
+def _eq_check(expected: object, actual: object) -> tuple[bool, str | None]:
+    return (expected == actual, f"esperado={expected}, obtido={actual}")
+
+
+def _request_summary(requests: Sequence[EvalLimitRequest]) -> list[tuple[float, str]]:
+    return [(item.novo_limite_solicitado, item.status_pedido.value) for item in requests]
+
+
 def _run_scenario(
     scenario: EvalScenario,
     settings: Settings,
     *,
     live_model: BaseChatModel | None,
     observability: TurnObservability,
+    scenario_id: str | None = None,
 ) -> ScenarioEvalResult:
     work_dir = settings.data_dir
     clients_path, _, requests_path = (work_dir / name for name in SEEDS)
@@ -198,53 +222,105 @@ def _run_scenario(
             leaked = contains_pii(result.reply, cpfs=cpfs, birth_dates=dates)
             pii_leaks += leaked
 
-            checks = {
-                "resposta sem erro": result.reply != ERROR_REPLY,
-                "autenticação": result.authenticated == expect.authenticated,
-                "encerramento": result.conversation_ended == expect.ended,
-                "agente ativo": result.active_agent == expect.active_agent,
-                "rota": route_ok,
-                "guardrail": telemetry.guardrail_blocked == expect.guardrail_blocked,
-                "tokens": expect.total_tokens is None
-                or telemetry.total_tokens == expect.total_tokens,
-                "confirmação": (pending.novo_limite_solicitado if pending else None)
-                == expect.confirmation_amount,
-                "valor para reenvio": state.get("pending_requested_limit")
-                == expect.pending_requested_limit,
-                "pedidos no CSV": _list_eval_requests(requests) == expect.requests,
-                "CSVs preservados": all(
-                    (work_dir / name).read_bytes() == data for name, data in before.items()
+            confirmation_amount = pending.novo_limite_solicitado if pending else None
+            pending_requested_limit = state.get("pending_requested_limit")
+            actual_requests = _list_eval_requests(requests)
+            changed_files = [
+                name for name, data in before.items() if (work_dir / name).read_bytes() != data
+            ]
+            missing_tool_parts = [part for part in expect.tool_contains if part not in tool_text]
+            missing_patterns = [
+                pattern
+                for pattern in expect.reply_patterns
+                if re.search(pattern, result.reply, re.IGNORECASE) is None
+            ]
+            reply_lower = result.reply.casefold()
+            forbidden_terms = [
+                term for term in expect.reply_not_contains if term.casefold() in reply_lower
+            ]
+            checks: dict[str, tuple[bool, str | None]] = {
+                "resposta sem erro": (result.reply != ERROR_REPLY, None),
+                "autenticação": _eq_check(expect.authenticated, result.authenticated),
+                "encerramento": _eq_check(expect.ended, result.conversation_ended),
+                "agente ativo": _eq_check(expect.active_agent, result.active_agent),
+                "rota": _eq_check(list(expect.route), list(telemetry.agent_route)),
+                "guardrail": _eq_check(expect.guardrail_blocked, telemetry.guardrail_blocked),
+                "tokens": (
+                    True,
+                    None,
+                )
+                if expect.total_tokens is None
+                else _eq_check(expect.total_tokens, telemetry.total_tokens),
+                "confirmação": _eq_check(expect.confirmation_amount, confirmation_amount),
+                "valor para reenvio": _eq_check(
+                    expect.pending_requested_limit, pending_requested_limit
                 ),
-                "resposta das ferramentas": all(part in tool_text for part in expect.tool_contains),
-                "resposta sem PII": not leaked,
+                "pedidos no CSV": (
+                    actual_requests == expect.requests,
+                    f"esperado={_request_summary(expect.requests)}, "
+                    f"obtido={_request_summary(actual_requests)}",
+                ),
+                "CSVs preservados": (not changed_files, f"alterados={changed_files}"),
+                "resposta das ferramentas": (
+                    not missing_tool_parts,
+                    f"ausentes={missing_tool_parts}",
+                ),
+                "resposta sem PII": (not leaked, None),
             }
+            if expect.reply_patterns:
+                checks["padrões na resposta"] = (
+                    not missing_patterns,
+                    f"ausentes={missing_patterns}",
+                )
+            if expect.reply_not_contains:
+                checks["termos proibidos na resposta"] = (
+                    not forbidden_terms,
+                    f"encontrados={forbidden_terms}",
+                )
             if expect.auth_attempts is not None:
-                checks["tentativas de autenticação"] = (
-                    state.get("auth_attempts", 0) == expect.auth_attempts
+                checks["tentativas de autenticação"] = _eq_check(
+                    expect.auth_attempts, state.get("auth_attempts", 0)
                 )
             if expect.tools is not None:
-                checks["ferramentas chamadas"] = telemetry.tools_called == expect.tools
+                checks["ferramentas chamadas"] = _eq_check(
+                    list(expect.tools), list(telemetry.tools_called)
+                )
             if expect.client_limit is not None or expect.client_score is not None:
                 cpf = state.get("client_cpf")
                 client = clients.get(cpf) if cpf else None
-                checks["limite do cliente"] = expect.client_limit is None or (
-                    client is not None and client.limite_atual == expect.client_limit
+                checks["limite do cliente"] = (
+                    (True, None)
+                    if expect.client_limit is None
+                    else _eq_check(expect.client_limit, client.limite_atual if client else None)
                 )
-                checks["score do cliente"] = expect.client_score is None or (
-                    client is not None and client.score == expect.client_score
+                checks["score do cliente"] = (
+                    (True, None)
+                    if expect.client_score is None
+                    else _eq_check(expect.client_score, client.score if client else None)
                 )
             if scripted is not None:
-                checks["resposta do roteiro"] = all(
-                    part in result.reply for part in expect.reply_contains
+                missing_reply_parts = [
+                    part for part in expect.reply_contains if part not in result.reply
+                ]
+                checks["resposta do roteiro"] = (
+                    not missing_reply_parts,
+                    f"ausentes={missing_reply_parts}",
                 )
-                checks["roteiro consumido"] = not scripted.responses
+                checks["roteiro consumido"] = (
+                    not scripted.responses,
+                    f"restantes={len(scripted.responses)}",
+                )
                 scripted.responses.clear()
             failures.extend(
-                f"Turno {index} · {check}" for check, passed in checks.items() if not passed
+                f"Turno {index} · {check} ({detail})"
+                if detail is not None
+                else f"Turno {index} · {check}"
+                for check, (passed, detail) in checks.items()
+                if not passed
             )
 
     return ScenarioEvalResult(
-        id=scenario.id,
+        id=scenario_id or scenario.id,
         passed=not failures,
         failures=tuple(failures),
         route_matches=route_matches,
@@ -261,10 +337,21 @@ def run_evals(
     scenarios_path: Path = DEFAULT_SCENARIOS_PATH,
     mode: Literal["offline", "live"] = "offline",
     settings: Settings | None = None,
+    scenario_ids: Sequence[str] | None = None,
+    runs: int = 1,
 ) -> EvalReport:
     if mode not in ("offline", "live"):
         raise ValueError("Modo de avaliação inválido")
+    if runs < 1:
+        raise ValueError("O número de execuções deve ser maior ou igual a 1")
     scenarios = load_scenarios(scenarios_path)
+    if scenario_ids:
+        requested = tuple(dict.fromkeys(scenario_ids))
+        by_id = {scenario.id: scenario for scenario in scenarios}
+        missing = [item for item in requested if item not in by_id]
+        if missing:
+            raise ValueError(f"Cenários não encontrados: {', '.join(missing)}")
+        scenarios = [by_id[item] for item in requested]
     offline = mode == "offline"
     model = None
     if offline:
@@ -294,18 +381,20 @@ def run_evals(
             tracing_context(enabled=False) if offline else nullcontext(),
         ):
             for scenario in scenarios:
-                with TemporaryDirectory(prefix="banco-agil-eval-") as directory:
-                    work_dir = Path(directory)
-                    for name in SEEDS:
-                        copyfile(runtime_settings.data_dir / name, work_dir / name)
-                    results.append(
-                        _run_scenario(
-                            scenario,
-                            runtime_settings.model_copy(update={"data_dir": work_dir}),
-                            live_model=model,
-                            observability=observability,
+                for run_index in range(1, runs + 1):
+                    with TemporaryDirectory(prefix="banco-agil-eval-") as directory:
+                        work_dir = Path(directory)
+                        for name in SEEDS:
+                            copyfile(runtime_settings.data_dir / name, work_dir / name)
+                        results.append(
+                            _run_scenario(
+                                scenario,
+                                runtime_settings.model_copy(update={"data_dir": work_dir}),
+                                live_model=model,
+                                observability=observability,
+                                scenario_id=f"{scenario.id}#{run_index}" if runs > 1 else None,
+                            )
                         )
-                    )
     finally:
         observability.flush()
 
