@@ -113,10 +113,10 @@ def _exchange_provider(scenario: EvalScenario, timeout: float) -> McpExchangeRat
     )
 
 
-def _requests(requests: CsvLimitRequestRepository) -> tuple[EvalLimitRequest, ...]:
+def _list_eval_requests(repository: CsvLimitRequestRepository) -> tuple[EvalLimitRequest, ...]:
     return tuple(
         EvalLimitRequest.model_validate(request.model_dump(exclude={"data_hora_solicitacao"}))
-        for request in requests.list_all()
+        for request in repository.list_all()
     )
 
 
@@ -211,7 +211,7 @@ def _run_scenario(
                 == expect.confirmation_amount,
                 "valor para reenvio": state.get("pending_requested_limit")
                 == expect.pending_requested_limit,
-                "pedidos no CSV": _requests(requests) == expect.requests,
+                "pedidos no CSV": _list_eval_requests(requests) == expect.requests,
                 "CSVs preservados": all(
                     (work_dir / name).read_bytes() == data for name, data in before.items()
                 ),
