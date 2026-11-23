@@ -406,6 +406,8 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "inclusive ao responder à sua pergunta pelo valor desejado",
                 "Nunca reabra automaticamente pedidos já rejeitados",
                 "nem trate valores de renda ou despesas como novo limite",
+                "outro assunto fora de crédito depois da consulta de limite",
+                "consulte o limite primeiro e então acione voltar_para_triagem imediatamente",
             ),
         ),
         (
@@ -420,6 +422,15 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "apenas em texto, sem acionar ferramentas",
                 "valores monetários sem rótulo",
                 "considerando o contexto da pergunta anterior",
+            ),
+        ),
+        (
+            build_exchange_prompt,
+            (
+                "Atue apenas na consulta de cotação de câmbio",
+                "Nunca informe nem invente cotações sem consultar_cotacao",
+                "nunca responda sobre limite ou score de crédito",
+                "acione voltar_para_triagem imediatamente",
             ),
         ),
     ],

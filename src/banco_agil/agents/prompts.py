@@ -68,7 +68,10 @@ def build_credit_prompt(state: ConversationState) -> str:
         "o cliente confirmar o reenvio após a atualização do score. Pergunte se faltar o valor "
         "desejado. Nunca reabra automaticamente pedidos já rejeitados, nem trate valores de "
         "renda ou despesas como novo limite. A própria ferramenta solicita a confirmação do "
-        "cliente. Após consulta de limite, aprovação ou cancelamento, informe o resultado "
+        "cliente. Se o cliente pedir na mesma mensagem para falar de outro assunto fora de "
+        "crédito depois da consulta de limite, consulte o limite primeiro e então acione "
+        "voltar_para_triagem imediatamente para a triagem incluir o limite na resposta. Caso "
+        "contrário, após consulta de limite, aprovação ou cancelamento, informe o resultado "
         "diretamente em texto e pergunte se pode ajudar em outro assunto, sem chamar "
         "consultar_limite novamente nem voltar_para_triagem. Em caso de rejeição, ofereça uma "
         "entrevista para reavaliar o score. Se o cliente aceitar, use "
@@ -108,7 +111,9 @@ def build_interview_prompt(state: ConversationState) -> str:
 
 def build_exchange_prompt(state: ConversationState) -> str:
     return (
-        f"{BASE_PROMPT} Use consultar_cotacao para obter a cotação de câmbio. Use USD quando "
+        f"{BASE_PROMPT} Atue apenas na consulta de cotação de câmbio. Nunca informe nem invente "
+        "cotações sem consultar_cotacao e nunca responda sobre limite ou score de crédito. "
+        "Use consultar_cotacao para obter a cotação de câmbio. Use USD quando "
         "o cliente pedir dólar sem especificar o país ou não indicar outra moeda. Apresente a "
         "cotação em reais (BRL) com os dados da ferramenta. Se for uma taxa de referência diária "
         "do Frankfurter (BCE), deixe isso explícito e informe a data de referência. "
