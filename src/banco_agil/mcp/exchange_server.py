@@ -1,53 +1,11 @@
 import argparse
-import logging
 import math
-from typing import Annotated
 
-from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BeforeValidator
 
 from banco_agil.config import Settings
-from banco_agil.domain.errors import DomainValidationError
-from banco_agil.domain.models import ExchangeQuote
-from banco_agil.domain.repositories import ExchangeRateProvider
-from banco_agil.infrastructure.exchange_client import ExchangeRateClient
 from banco_agil.infrastructure.privacy import configure_logging
-
-logger = logging.getLogger(__name__)
-QUOTE_TOOL = "consultar_cotacao_cambio"
-INVALID_CURRENCY = "INVALID_CURRENCY:"
-UNAVAILABLE_MESSAGE = "Não foi possível consultar a cotação no momento."
-
-# Let the domain reject non-strings without echoing the input in an SDK validation error.
-CurrencyInput = Annotated[
-    str, BeforeValidator(lambda value: value if isinstance(value, str) else "")
-]
-
-
-def create_exchange_mcp_server(
-    exchange_provider: ExchangeRateProvider | None = None, *, timeout_seconds: float = 8.0
-) -> MCPServer:
-    provider = (
-        exchange_provider
-        if exchange_provider is not None
-        else ExchangeRateClient(timeout_seconds=timeout_seconds)
-    )
-    server = MCPServer("banco-agil-cambio")
-
-    @server.tool(name=QUOTE_TOOL)
-    async def consultar_cotacao_cambio(moeda: CurrencyInput = "USD") -> ExchangeQuote:
-        """Consulta em reais a cotação da moeda informada. O padrão é USD."""
-        try:
-            return await provider.get_quote(moeda)
-        except DomainValidationError as exc:
-            raise ToolError(f"{INVALID_CURRENCY} {exc}") from None
-        except Exception as exc:
-            logger.error("Falha no servidor MCP de câmbio (%s)", type(exc).__name__)
-            raise ToolError(f"EXCHANGE_UNAVAILABLE: {UNAVAILABLE_MESSAGE}") from None
-
-    return server
+from banco_agil.mcp.exchange import create_exchange_mcp_server
 
 
 def main() -> None:

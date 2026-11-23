@@ -31,6 +31,7 @@ def test_graph_requires_exchange_provider(scripted_model, credit_service):
 
 def test_graph_has_no_mcp_exchange_dependency():
     source = inspect.getsource(agent_graph)
+    assert "banco_agil.mcp" not in source
     assert "mcp_exchange_client" not in source
     assert "McpExchangeRateProvider" not in source
 

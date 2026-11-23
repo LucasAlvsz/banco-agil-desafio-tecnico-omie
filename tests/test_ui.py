@@ -10,8 +10,8 @@ from banco_agil import runtime as runtime_module
 from banco_agil.agents.graph import ERROR_REPLY
 from banco_agil.agents.guardrails import GUARDRAIL_BLOCKED_REPLY
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
-from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import LangfuseObservability
+from banco_agil.mcp import McpExchangeRateProvider
 from banco_agil.runtime import ConversationRuntime
 from banco_agil.ui.client import LocalChatClient
 

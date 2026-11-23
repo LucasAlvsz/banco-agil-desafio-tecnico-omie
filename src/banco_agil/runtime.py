@@ -24,8 +24,8 @@ from banco_agil.infrastructure.csv_repositories import (
     CsvScoreLimitRepository,
 )
 from banco_agil.infrastructure.llm_factory import create_chat_model
-from banco_agil.infrastructure.mcp_exchange_client import create_exchange_provider
 from banco_agil.infrastructure.observability import TurnObservability, create_langfuse_observability
+from banco_agil.mcp import create_exchange_provider
 
 
 class ConversationRuntime:

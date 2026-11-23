@@ -1,5 +1,5 @@
 import sys
-from pathlib import Path
+from importlib.util import find_spec
 from unittest.mock import Mock
 
 import httpx
@@ -8,20 +8,21 @@ from langchain_core.messages import AIMessage, ToolMessage
 from mcp import StdioServerParameters
 from mcp.client import Client
 from mcp.server import MCPServer
-from mcp.types import CallToolResult, ListToolsResult, TextContent
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from pydantic import ValidationError
 
+from banco_agil import mcp
 from banco_agil.agents.graph import build_graph, run_turn
 from banco_agil.config import Settings
 from banco_agil.domain.errors import DomainValidationError, ExchangeServiceError
 from banco_agil.domain.models import ExchangeQuote
-from banco_agil.infrastructure import mcp_exchange_client
 from banco_agil.infrastructure.exchange_client import ExchangeRateClient
-from banco_agil.infrastructure.mcp_exchange_client import (
+from banco_agil.mcp import (
     McpExchangeRateProvider,
+    create_exchange_mcp_server,
     create_exchange_provider,
+    exchange_server,
 )
-from banco_agil.mcp import exchange_server
 
 TOOL = "consultar_cotacao_cambio"
 PRIVATE = "123.456.789-01"
@@ -56,8 +57,19 @@ def exchange_http():
     return provider
 
 
+def test_mcp_facade_keeps_the_wire_protocol_private():
+    public = {"McpExchangeRateProvider", "create_exchange_mcp_server", "create_exchange_provider"}
+    assert set(mcp.__all__) == public
+    submodules = {"exchange", "exchange_server"}
+    assert {name for name in vars(mcp) if not name.startswith("__")} - submodules == public
+
+
+def test_legacy_mcp_exchange_client_module_is_removed():
+    assert find_spec("banco_agil.infrastructure.mcp_exchange_client") is None
+
+
 async def test_mcp_schema_and_default_quote(exchange_http):
-    server = exchange_server.create_exchange_mcp_server(exchange_http())
+    server = create_exchange_mcp_server(exchange_http())
     async with Client(server) as client:
         (tool,) = (await client.list_tools()).tools
         assert tool.name == TOOL
@@ -129,7 +141,7 @@ def test_authenticated_graph_quotes_through_mcp(
 
 @pytest.mark.parametrize("currency", ["BRL", "", "moeda desconhecida", PRIVATE, {"cpf": PRIVATE}])
 async def test_mcp_returns_safe_validation_error(exchange_http, currency):
-    server = exchange_server.create_exchange_mcp_server(exchange_http())
+    server = create_exchange_mcp_server(exchange_http())
     async with Client(server) as client:
         await client.list_tools()
         result = await client.call_tool(TOOL, {"moeda": currency})
@@ -163,25 +175,25 @@ async def test_mcp_provider_failure_logs_only_exception_class(exchange_http, cap
         await remote.get_quote()
 
     error_type = "RuntimeError" if unexpected else "ExchangeServiceError"
-    server_logs = [r for r in caplog.records if r.name == exchange_server.__name__]
-    assert [r.getMessage() for r in server_logs] == [
-        f"Falha no servidor MCP de câmbio ({error_type})"
+    exchange_logs = [r for r in caplog.records if r.name == "banco_agil.mcp.exchange"]
+    assert [r.getMessage() for r in exchange_logs] == [
+        f"Falha no servidor MCP de câmbio ({error_type})",
+        "Falha na chamada MCP de câmbio (ExchangeServiceError)",
     ]
-    assert server_logs[0].exc_info is None
+    assert all(record.exc_info is None for record in exchange_logs)
     assert PRIVATE not in caplog.text
 
 
 @pytest.mark.parametrize("transport", ["inmemory", "stdio", "streamable_http"])
-async def test_factory_and_transport_discovery(monkeypatch, exchange_http, transport):
+async def test_factory_and_transport_discovery(exchange_http, transport):
     url = "http://mcp-exchange:8001/mcp"
     settings = Settings(
         mcp_exchange_transport=transport, mcp_exchange_url=url, exchange_timeout_seconds=3
     )
     # Use a real in-process MCP session for every mode behind the transport spy.
-    server = exchange_server.create_exchange_mcp_server(exchange_http())
+    server = create_exchange_mcp_server(exchange_http())
     client_factory = Mock(side_effect=lambda *args, **kwargs: Client(server))
-    monkeypatch.setattr(mcp_exchange_client, "Client", client_factory)
-    provider = create_exchange_provider(settings)
+    provider = create_exchange_provider(settings, client_factory=client_factory)
     assert await provider.get_quote() == QUOTE
     (endpoint,), kwargs = client_factory.call_args
     if transport == "inmemory":
@@ -197,48 +209,70 @@ async def test_factory_and_transport_discovery(monkeypatch, exchange_http, trans
         assert kwargs == {"read_timeout_seconds": 6}
 
 
-@pytest.mark.parametrize("url", [None, " ", "ftp://localhost", "http://localhost:0", "https://"])
-def test_streamable_http_requires_http_url(url):
-    with pytest.raises(ValidationError, match="MCP_EXCHANGE_URL|HTTP ou HTTPS"):
+@pytest.mark.parametrize("url", [None, " "])
+def test_streamable_http_requires_configured_url(url):
+    with pytest.raises(ValidationError) as error:
+        Settings(mcp_exchange_transport="streamable_http", mcp_exchange_url=url)
+
+    (detail,) = error.value.errors()
+    assert detail["msg"] == "Value error, Configure MCP_EXCHANGE_URL para usar streamable_http."
+
+
+@pytest.mark.parametrize("url", ["ftp://localhost", "http://localhost:0", "https://"])
+def test_streamable_http_requires_valid_http_url(url):
+    with pytest.raises(ValidationError, match="Informe uma URL HTTP ou HTTPS válida"):
         Settings(mcp_exchange_transport="streamable_http", mcp_exchange_url=url)
 
 
-@pytest.mark.parametrize("failure", ["session", "missing", "bad_json", "bad_shape", "no_quote"])
-async def test_mcp_provider_handles_bad_session_or_response(monkeypatch, caplog, failure):
-    provider = McpExchangeRateProvider.in_memory()
-    if failure == "session":
-        monkeypatch.setattr(mcp_exchange_client, "Client", Mock(side_effect=OSError(PRIVATE)))
-    elif failure == "missing":
+class FakeMcpClient:
+    def __init__(self, result, *, tool_available=True):
+        self.result = result
+        self.tool_available = tool_available
 
-        async def list_tools(self):
-            return ListToolsResult(tools=[])
+    async def __aenter__(self):
+        return self
 
-        monkeypatch.setattr(Client, "list_tools", list_tools)
-    else:
-        responses = {
-            "bad_json": CallToolResult(content=[TextContent(type="text", text=PRIVATE)]),
-            "bad_shape": CallToolResult(content=[], structured_content={"bad": PRIVATE}),
-            "no_quote": CallToolResult(content=[]),
-        }
+    async def __aexit__(self, exc_type, exc, traceback):
+        pass
 
-        async def call_tool(self, name, arguments):
-            return responses[failure]
+    async def list_tools(self):
+        tools = [Tool(name=TOOL, input_schema={})] if self.tool_available else []
+        return ListToolsResult(tools=tools)
 
-        monkeypatch.setattr(Client, "call_tool", call_tool)
+    async def call_tool(self, name, arguments):
+        assert name == TOOL and arguments == {"moeda": "USD"}
+        return self.result
 
+
+@pytest.mark.parametrize(
+    ("failure", "response"),
+    [
+        ("session", CallToolResult(content=[])),
+        ("missing", CallToolResult(content=[], structured_content=QUOTE.model_dump())),
+        ("bad_json", CallToolResult(content=[TextContent(type="text", text=PRIVATE)])),
+        ("bad_shape", CallToolResult(content=[], structured_content={"bad": PRIVATE})),
+        ("no_quote", CallToolResult(content=[])),
+    ],
+    ids=["session", "missing", "bad_json", "bad_shape", "no_quote"],
+)
+async def test_mcp_provider_handles_bad_session_or_response(caplog, failure, response):
+    client_factory = Mock(
+        return_value=FakeMcpClient(response, tool_available=failure != "missing"),
+        side_effect=OSError(PRIVATE) if failure == "session" else None,
+    )
+    provider = McpExchangeRateProvider.in_memory(client_factory=client_factory)
     with pytest.raises(ExchangeServiceError) as error:
         await provider.get_quote()
     assert str(error.value) == "Não foi possível consultar a cotação no momento."
     assert PRIVATE not in caplog.text
 
 
-async def test_mcp_accepts_json_text_result(monkeypatch):
-    async def call_tool(self, name, arguments):
-        assert name == TOOL and arguments == {"moeda": "USD"}
-        return CallToolResult(content=[TextContent(type="text", text=QUOTE.model_dump_json())])
-
-    monkeypatch.setattr(Client, "call_tool", call_tool)
-    assert await McpExchangeRateProvider.in_memory().get_quote() == QUOTE
+async def test_mcp_accepts_json_text_result():
+    server = create_exchange_mcp_server()
+    response = CallToolResult(content=[TextContent(type="text", text=QUOTE.model_dump_json())])
+    client = FakeMcpClient(response)
+    provider = McpExchangeRateProvider(server, client_factory=Mock(return_value=client))
+    assert await provider.get_quote() == QUOTE
 
 
 def test_stdio_cli_uses_settings(monkeypatch):
@@ -304,10 +338,14 @@ def test_cli_rejects_invalid_timeout(monkeypatch, capsys):
     assert "positivo e finito" in capsys.readouterr().err
 
 
-def test_http_factory_rejects_url_when_settings_validation_was_bypassed():
-    with pytest.raises(ValueError, match="MCP_EXCHANGE_URL"):
+@pytest.mark.parametrize("url", [None, " "])
+def test_http_factory_rejects_url_when_settings_validation_was_bypassed(url):
+    with pytest.raises(
+        ValueError, match=r"^Configure MCP_EXCHANGE_URL para usar streamable_http\.$"
+    ):
         create_exchange_provider(
             Settings.model_construct(
-                mcp_exchange_transport="streamable_http", data_dir=Path("data")
+                mcp_exchange_transport="streamable_http",
+                mcp_exchange_url=url,
             )
         )

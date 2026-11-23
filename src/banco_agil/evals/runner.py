@@ -40,9 +40,9 @@ from banco_agil.infrastructure.exchange_client import (
     FRANKFURTER_URL,
     ExchangeRateClient,
 )
-from banco_agil.infrastructure.mcp_exchange_client import McpExchangeRateProvider
 from banco_agil.infrastructure.observability import TurnObservability, create_langfuse_observability
 from banco_agil.infrastructure.privacy import CPF_PATTERN, DATE_PATTERN
+from banco_agil.mcp import McpExchangeRateProvider
 from banco_agil.runtime import ConversationRuntime
 
 DEFAULT_SCENARIOS_PATH = Path("evals/scenarios.json")
