@@ -4,7 +4,7 @@
 *(vazio)*
 
 ## To Do
-- [ ] **Spike — Helpers de Privacidade/CSV em `evals/runner.py` (Candidato 6):** avaliar consolidação ou simplificação dos helpers auxiliares de privacidade e leitura CSV no runner de evals.
+*(vazio)*
 
 ## Done
 - [x] **F00 — Fundação:** repo git, `uv`, `ruff`, `mypy`, `pytest`, `pre-commit`, `AGENTS.md`, `docs/spec.md`, `docs/backlog.md`, template de ADR, plano e notas da F00.
@@ -24,3 +24,4 @@
 - [x] **F13 — Seam `ChatClient` na UI Streamlit:** `ConversationRuntime.reset_thread` (`delete_thread` + `flush()` preservando ownership), protocolo `ChatClient`, `ChatClientError`/`ApiClientError`, `LocalChatClient`, `HttpChatClient` e `create_chat_client` (`src/banco_agil/ui/client.py`), UI Streamlit (`src/banco_agil/ui/app.py`) como apresentação pura com reutilização de `st.session_state.client` em *Nova conversa*, atualização do ADR 002, 446 testes (99% cobertura) e 12/12 evals.
 - [x] **F14 — Contratos de Agentes e Seam de Guardrails:** `AGENT_NODES` derivado de `AgentName`, contratos HITL tipados (`LimitIncreaseConfirmation`/`LimitIncreaseDecision` em `agents/state.py` preservando OpenAPI), `InputGuardrailDecision.cleaned_text` validado em `agents/guardrails.py`, gate de Autenticação centralizado em `_require_authenticated_client`, marcação declarativa de handoffs (`_HANDOFF_EXTRA` + `is_handoff_tool`), remoção do acoplamento a `McpExchangeRateProvider` em `agents/graph.py` com `exchange_provider` obrigatório, 475 testes (99% cobertura) e 12/12 evals.
 - [x] **F15 — Colocalização do Protocolo MCP de Câmbio:** `Settings.resolve_mcp_exchange_url()` como fonte única em `config.py`, protocolo de fio/codec privados, servidor, cliente `McpExchangeRateProvider` e `create_exchange_provider` colocalizados em `src/banco_agil/mcp/exchange.py` com fachada estreita em `banco_agil.mcp`, `exchange_server.py` reduzido a CLI fina, remoção de `infrastructure/mcp_exchange_client.py`, costura `client_factory` eliminando monkeypatches globais de `Client`, 481 testes (99% cobertura) e 12/12 evals.
+- [x] **F16 — Alinhamento do Executor de Evals às Costuras de Privacidade e CSV:** `contains_pii()` pública em `infrastructure/privacy.py` (estritamente CPF e data de nascimento) com encapsulamento privado de `_CPF_PATTERN`/`_DATE_PATTERN`/`_SECRET_PATTERN`, `list_all()` em `CsvClientRepository` e `CsvLimitRequestRepository` (com `_is_empty()` compartilhado e `Protocol`s de domínio preservados), migração de `evals/runner.py` removendo `import csv`/`_seed_pii`/regexes internas e testes na interface pública, 506 testes (99% cobertura) e 12/12 evals.
