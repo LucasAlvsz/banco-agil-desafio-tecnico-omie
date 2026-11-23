@@ -108,8 +108,8 @@ O MVP trata CPF e data de nascimento como PII e aplica mascaramento a logs, trac
 │   ├── api/            # API REST e contratos HTTP
 │   ├── domain/         # Regras, modelos, protocolos e serviço de crédito
 │   ├── evals/          # Executor de avaliações
-│   ├── infrastructure/ # CSV, LiteLLM, câmbio, privacidade e observabilidade
-│   ├── mcp/            # Servidor MCP de câmbio
+│   ├── infrastructure/ # CSV, LiteLLM, câmbio HTTP, privacidade e observabilidade
+│   ├── mcp/            # Protocolo MCP de câmbio (cliente, servidor e CLI)
 │   └── ui/             # Interface Streamlit e cliente HTTP
 ├── data/               # Cadastro, faixas de crédito e histórico de pedidos
 ├── evals/              # Cenários declarativos

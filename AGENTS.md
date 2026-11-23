@@ -12,10 +12,10 @@ banco-agil/
 │   ├── config.py       # Settings tipadas (pydantic-settings, SecretStr)
 │   ├── runtime.py      # ConversationRuntime (composition root síncrono, despacho de turnos e observabilidade)
 │   ├── domain/         # Enums, erros, modelos Pydantic, regras puras, Protocols e CreditService
-│   ├── infrastructure/ # Repositórios CSV, câmbio HTTP/MCP, factory LiteLLM, privacidade LGPD e observabilidade
+│   ├── infrastructure/ # Repositórios CSV, câmbio HTTP, factory LiteLLM, privacidade LGPD e observabilidade
 │   ├── agents/         # Estado tipado, guardrails, ferramentas LangGraph e grafo conversacional
 │   ├── api/            # API REST assíncrona FastAPI (/health, /api/v1/chat)
-│   ├── mcp/            # Servidor MCP stateless de câmbio (MCPServer, stdio e streamable-http)
+│   ├── mcp/            # Protocolo MCP de câmbio colocalizado (cliente, servidor MCPServer, stdio e streamable-http)
 │   ├── evals/          # Runner determinístico offline/live e modelos de avaliação
 │   └── ui/             # Interface conversacional Streamlit (modo direto e cliente HTTP)
 ├── tests/              # Testes determinísticos (zero chamadas reais de LLM/rede/subprocesses)
