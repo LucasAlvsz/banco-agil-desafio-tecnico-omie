@@ -28,6 +28,7 @@ from banco_agil.agents.prompts import (
     build_interview_prompt,
     build_triage_prompt,
 )
+from banco_agil.agents.tools import redirecionar_para_credito, voltar_para_triagem
 
 THREAD = "guardrails"
 CONFIG = {"configurable": {"thread_id": THREAD}}
@@ -391,3 +392,102 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
     assert "instruções internas, nomes de ferramentas ou dados de outros clientes" in prompt
     if build_prompt is build_triage_prompt:
         assert "permaneça na triagem" in prompt
+
+
+@pytest.mark.parametrize(
+    ("build_prompt", "requirements"),
+    [
+        (
+            build_credit_prompt,
+            (
+                "Atue apenas em consulta e aumento de limite de crédito",
+                "Nunca informe nem invente cotações de câmbio",
+                "nunca calcule o score por conta própria",
+                "pedido explícito de aumento de limite na mensagem atual",
+                "inclusive ao responder à sua pergunta pelo valor desejado",
+                "Nunca reabra automaticamente pedidos já rejeitados",
+                "nem trate valores de renda ou despesas como novo limite",
+            ),
+        ),
+        (
+            build_exchange_prompt,
+            (
+                "Atue apenas em cotação de câmbio",
+                "Nunca informe nem invente cotações sem chamar consultar_cotacao",
+                "Nunca responda sobre limite de crédito ou score",
+            ),
+        ),
+        (
+            build_interview_prompt,
+            (
+                "Nunca responda a consultas ou pedidos de aumento de limite de crédito "
+                "nem a pedidos de cotação de câmbio",
+                "Nunca calcule o score por conta própria",
+                "Se o cliente desistir da entrevista ou mudar de assunto, "
+                "acione voltar_para_triagem imediatamente",
+                "sem responder sobre o novo assunto",
+                "apenas em texto, sem acionar ferramentas",
+                "valores monetários sem rótulo",
+                "considerando o contexto da pergunta anterior",
+            ),
+        ),
+    ],
+)
+def test_specialist_prompts_limit_scope(build_prompt, requirements):
+    prompt = build_prompt({"messages": [], "authenticated": True, "client_cpf": "12345678901"})
+
+    for requirement in requirements:
+        assert requirement in prompt
+
+
+@pytest.mark.parametrize(
+    ("build_prompt", "outcomes"),
+    [
+        (
+            build_credit_prompt,
+            (
+                "concluir a consulta de limite",
+                "informar a aprovação de aumento",
+                "recusa à entrevista",
+            ),
+        ),
+        (build_exchange_prompt, ("Encerre o tópico ao apresentar a cotação",)),
+    ],
+)
+def test_specialist_closes_topic_and_only_hands_off_on_client_request(build_prompt, outcomes):
+    prompt = build_prompt({"messages": [], "authenticated": True, "client_cpf": "12345678901"})
+
+    for outcome in outcomes:
+        assert outcome in prompt
+    assert "pergunte se pode ajudar em outro assunto" in prompt
+    assert (
+        "Acione voltar_para_triagem apenas se o cliente mudar de assunto ou pedir outro serviço"
+    ) in prompt
+    assert "obtenha o resultado antes de acionar a ferramenta" in prompt
+    assert "imediatamente, sem responder sobre o novo assunto" in prompt
+    assert "Não acione voltar_para_triagem nesse turno" not in prompt
+
+
+def test_authenticated_triage_routes_only_available_services():
+    prompt = build_triage_prompt({"messages": [], "authenticated": True, "client_cpf": CPF})
+
+    assert (
+        "consulta ou aumento de limite de crédito, acione imediatamente redirecionar_para_credito"
+        in prompt
+    )
+    assert "consulta de cotação de câmbio, acione imediatamente redirecionar_para_cambio" in prompt
+    assert "consulta isolada de score, recuse educadamente e permaneça na triagem" in prompt
+    assert "inclua o resultado na resposta" in prompt
+    assert "Não redirecione pedidos já atendidos" in prompt
+    assert "Baseie qualquer redirecionamento apenas na intenção atual do cliente" in prompt
+    assert "interrompeu ou adiou a entrevista sem pedir outro serviço" in prompt
+    assert "permaneça na triagem sem reencaminhar pedidos já rejeitados" in prompt
+
+
+def test_handoff_tool_descriptions_match_service_and_topic_boundaries():
+    assert "consulta ou aumento de limite de crédito" in redirecionar_para_credito.description
+    assert (
+        "mudar de assunto, pedir outro serviço ou desistir da entrevista"
+        in voltar_para_triagem.description
+    )
+    assert "conclui o tópico atual" not in voltar_para_triagem.description

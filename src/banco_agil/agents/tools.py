@@ -268,12 +268,20 @@ def _redirect(
 ) -> Command[Any]:
     if isinstance(auth := _require_authenticated_client(runtime), Command):
         return auth
-    return _tool_result(runtime, "Continue o atendimento.", active_agent=agent)
+    messages = {
+        "entrevista": (
+            "Entrevista de crédito iniciada. Colete os cinco indicadores financeiros antes de "
+            "chamar calcular_e_atualizar_score."
+        ),
+        "credito": "Atendimento de crédito ativo. Atenda apenas a solicitação atual do cliente.",
+        "cambio": "Atendimento de câmbio ativo. Consulte a cotação solicitada pelo cliente.",
+    }
+    return _tool_result(runtime, messages[agent], active_agent=agent)
 
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Continua o atendimento sobre crédito após a autenticação do cliente."""
+    """Encaminha o cliente autenticado para consulta ou aumento de limite de crédito."""
     return _redirect(runtime, "credito")
 
 
@@ -291,5 +299,21 @@ def redirecionar_para_cambio(runtime: ToolRuntime[None, ConversationState]) -> C
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Retoma a triagem quando o cliente muda de assunto ou conclui o tópico atual."""
-    return _tool_result(runtime, "Continue o atendimento.", active_agent="triagem")
+    """Retoma a triagem.
+
+    Use se o cliente mudar de assunto, pedir outro serviço ou desistir da entrevista.
+    """
+    if runtime.state.get("active_agent") == "entrevista":
+        return _tool_result(
+            runtime,
+            "Entrevista de crédito interrompida antes da conclusão. Atenda apenas a intenção "
+            "atual do cliente, sem reabrir pedidos já rejeitados.",
+            active_agent="triagem",
+            pending_requested_limit=None,
+        )
+    return _tool_result(
+        runtime,
+        "Retomando a triagem. Inclua resultados já obtidos neste turno e atenda apenas a "
+        "intenção atual do cliente.",
+        active_agent="triagem",
+    )

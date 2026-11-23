@@ -1,8 +1,7 @@
 import csv
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -11,7 +10,7 @@ from langgraph.prebuilt import ToolRuntime
 from banco_agil.agents.graph import build_graph, resume_turn, run_turn
 from banco_agil.agents.tools import build_interview_tools
 from banco_agil.domain.errors import ClientNotFoundError, PersistenceError
-from banco_agil.domain.models import Client
+from banco_agil.domain.models import Client, ExchangeQuote
 
 THREAD = "interview-test"
 CONFIG = {"configurable": {"thread_id": THREAD}}
@@ -32,10 +31,12 @@ ANSWERS = {
 
 @pytest.fixture
 def interview_files(data_dir):
-    seeds = Path(__file__).resolve().parents[1] / "data"
     clients = data_dir / "clientes.csv"
-    for path in (clients, data_dir / "score_limite.csv"):
-        path.write_bytes((seeds / path.name).read_bytes())
+    with clients.open("a", encoding="utf-8") as stream:
+        stream.write(f"{CARLOS},Carlos Mendes,1985-04-10,5000.00,720\n")
+    (data_dir / "score_limite.csv").write_text(
+        "score_minimo,limite_maximo\n0,1000.00\n300,3000.00\n500,7000.00\n"
+    )
     return clients, data_dir / "solicitacoes_aumento_limite.csv"
 
 
@@ -373,10 +374,16 @@ def test_parallel_calls_apply_only_the_selected_transition(
         "close": call("encerrar_atendimento", "close", motivo="Pedido do cliente"),
     }
     graph, _ = start_interview(
-        tool_step(*(calls[call_id] for call_id in batch)), AIMessage(content="Tudo certo.")
+        tool_step(*(calls[call_id] for call_id in batch)),
+        AIMessage(content="Tudo certo."),
     )
 
-    result = turn(graph)
+    result = turn(
+        graph,
+        "Quero deixar a entrevista para outra hora."
+        if agent == "triagem"
+        else "Quero continuar a entrevista.",
+    )
 
     assert result.reply == "Tudo certo."
     assert result.active_agent == agent
@@ -391,3 +398,168 @@ def test_parallel_calls_apply_only_the_selected_transition(
     else:
         recalculate.assert_not_called()
         assert clients.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "income_and_expenses",
+    ["renda mensal 15 mil, despesas fixas de 1000 reais", "R$ 15 mil por mês e R$ 1 mil fixos"],
+)
+def test_interview_answers_preserve_the_rejected_amount_without_reopening_the_request(
+    scripted_model, credit_service, interview_files, income_and_expenses
+):
+    clients, requests = interview_files
+    exchange = Mock()
+    exchange.get_quote = AsyncMock(
+        return_value=ExchangeQuote(
+            currency_code="EUR",
+            currency_name="Euro",
+            bid=6.4874,
+            ask=6.4894,
+            timestamp="22/11/2026 às 19:26",
+            source="AwesomeAPI",
+        )
+    )
+    questions = ("Qual é seu tipo de emprego?", "Quantos dependentes você tem? Tem dívidas?")
+    model = scripted_model(
+        responses=[
+            tool_step(
+                call("autenticar_cliente", "auth", cpf=CPF_INPUT, data_nascimento=DATE_INPUT)
+            ),
+            tool_step(call("redirecionar_para_cambio", "exchange")),
+            tool_step(call("consultar_cotacao", "quote", moeda="EUR")),
+            AIMessage(content="Cotação do euro (EUR): compra R$ 6,4874 e venda R$ 6,4894."),
+            tool_step(call("voltar_para_triagem", "back-exchange")),
+            tool_step(call("redirecionar_para_credito", "credit")),
+            tool_step(call("solicitar_aumento_limite", "first", novo_limite=20000)),
+            AIMessage(content="O pedido foi rejeitado. Gostaria de fazer uma entrevista?"),
+            tool_step(call("redirecionar_para_entrevista", "interview")),
+            AIMessage(content="Informe sua renda mensal e despesas fixas."),
+            AIMessage(content=questions[0]),
+            AIMessage(content=questions[1]),
+        ]
+    )
+    graph = build_graph(model, credit_service, exchange)
+    quote = turn(graph, f"Meu CPF é {CPF_INPUT}, nasci em {DATE_INPUT}. Qual a cotação do euro?")
+    assert quote.active_agent == "cambio"
+    exchange.get_quote.assert_awaited_once_with("EUR")
+    assert tool_messages(graph)["exchange"].text == (
+        "Atendimento de câmbio ativo. Consulte a cotação solicitada pelo cliente."
+    )
+
+    initial = turn(graph, "quero aumentar meu limite para 20 mil")
+    assert initial.pending_confirmation.novo_limite_solicitado == 20000
+    assert tool_messages(graph)["back-exchange"].text == (
+        "Retomando a triagem. Inclua resultados já obtidos neste turno e atenda apenas a "
+        "intenção atual do cliente."
+    )
+    rejected = resume_turn(graph, thread_id=THREAD, approved=True)
+    assert rejected.pending_confirmation is None
+    (request,) = csv_rows(requests)
+    assert request["status_pedido"] == "rejeitado"
+    original_clients = clients.read_bytes()
+    original_requests = requests.read_bytes()
+    assert turn(graph, "sim por favor").active_agent == "entrevista"
+    handoff = tool_messages(graph)["interview"]
+    assert handoff.text == (
+        "Entrevista de crédito iniciada. Colete os cinco indicadores financeiros antes de chamar "
+        "calcular_e_atualizar_score."
+    )
+    assert model.calls[-1]["messages"][-1] == handoff
+    assert_private(handoff.model_dump_json())
+
+    for answer, question in zip(
+        (income_and_expenses, "sou autonoma empresaria"), questions, strict=True
+    ):
+        previous_calls = len(model.calls)
+        result = turn(graph, answer)
+        assert result.pending_confirmation is None, result.reply
+        assert result.active_agent == "entrevista"
+        assert result.telemetry.agent_route == ("entrevista",)
+        assert result.reply == question
+        assert len(model.calls) == previous_calls + 1
+        prompt = model.calls[-1]["messages"][0].text
+        assert "apenas em texto, sem acionar ferramentas" in prompt
+        assert "valores monetários sem rótulo" in prompt
+        assert graph.get_state(CONFIG).values["pending_requested_limit"] == 20000
+        assert clients.read_bytes() == original_clients
+        assert requests.read_bytes() == original_requests
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Quero parar a entrevista e tentar de novo o aumento para R$ 20 mil.",
+        "Sou autônoma, mas prefiro parar a entrevista e tentar de novo o aumento para R$ 20 mil.",
+        "Sou autônoma, mas não vou continuar com a entrevista. "
+        "Quero tentar de novo o aumento para R$ 20 mil",
+    ],
+)
+def test_client_can_leave_interview_and_request_the_same_limit(
+    start_interview, interview_files, message
+):
+    clients, requests = interview_files
+    original_clients = clients.read_bytes()
+    original_requests = requests.read_bytes()
+    graph, model = start_interview(
+        tool_step(call("voltar_para_triagem", "back")),
+        tool_step(call("redirecionar_para_credito", "credit")),
+        tool_step(call("solicitar_aumento_limite", "retry", novo_limite=20000)),
+    )
+    graph.update_state(CONFIG, {"pending_requested_limit": 20000}, as_node="credito")
+
+    result = turn(graph, message)
+
+    assert result.active_agent == "credito"
+    assert result.pending_confirmation.novo_limite_solicitado == 20000
+    assert result.telemetry.agent_route == ("entrevista", "triagem", "credito")
+    assert len(model.calls) == 3
+    assert all(invocation["tools"] is not None for invocation in model.calls)
+    assert graph.get_state(CONFIG).values["pending_requested_limit"] is None
+    credit_prompt = model.calls[-1]["messages"][0].text
+    assert "O último valor solicitado" not in credit_prompt
+    assert tool_messages(graph)["credit"].text == (
+        "Atendimento de crédito ativo. Atenda apenas a solicitação atual do cliente."
+    )
+    assert clients.read_bytes() == original_clients
+    assert requests.read_bytes() == original_requests
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Quero parar a entrevista.", "Prefiro a segunda opção"],
+)
+def test_leaving_interview_without_a_new_request_stays_in_triage(
+    start_interview, interview_files, message
+):
+    clients, requests = interview_files
+    original_clients = clients.read_bytes()
+    original_requests = requests.read_bytes()
+    question = "Você prefere continuar a entrevista agora ou voltar a ela outro dia?"
+    graph, model = start_interview(
+        AIMessage(content=question),
+        tool_step(call("voltar_para_triagem", "back")),
+        AIMessage(content="Tudo bem. Como posso ajudar?"),
+    )
+    graph.update_state(CONFIG, {"pending_requested_limit": 20000}, as_node="credito")
+    assert turn(graph).reply == question
+
+    result = turn(graph, message)
+
+    assert result.reply == "Tudo bem. Como posso ajudar?"
+    assert result.pending_confirmation is None
+    assert result.active_agent == "triagem"
+    assert result.telemetry.agent_route == ("entrevista", "triagem")
+    assert result.telemetry.tools_called == ("voltar_para_triagem",)
+    assert graph.get_state(CONFIG).values["pending_requested_limit"] is None
+    assert len(model.calls) == 3
+    assert [item.text for item in model.calls[1]["messages"][-2:]] == [question, message]
+    assert all(invocation["tools"] is not None for invocation in model.calls)
+    handoff = tool_messages(graph)["back"]
+    assert handoff.text == (
+        "Entrevista de crédito interrompida antes da conclusão. Atenda apenas a intenção atual "
+        "do cliente, sem reabrir pedidos já rejeitados."
+    )
+    assert model.calls[-1]["messages"][-1] == handoff
+    assert_private(handoff.model_dump_json(), result.model_dump_json())
+    assert clients.read_bytes() == original_clients
+    assert requests.read_bytes() == original_requests
