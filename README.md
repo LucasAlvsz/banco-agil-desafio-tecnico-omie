@@ -16,33 +16,49 @@ O grafo mantém um checkpoint por `thread_id`. Na entrada e após cada lote de f
 
 ```mermaid
 flowchart TD
-    start([START]) --> route["_route_agent"]
-    route -->|"Atendimento já encerrado na entrada"| finish([END])
-    route --> gate{"Cliente autenticado?"}
-    gate -->|Não| triagem["triagem"]
-    gate -->|Sim| active["Agente ativo no atendimento"]
-    active --> triagem
-    active --> credito["credito"]
-    active --> entrevista["entrevista"]
-    active --> cambio["cambio"]
+    start(["START"]) --> route["_route_agent"]
+    route -->|"Encerrado na entrada"| finish(["END"])
+    route --> gate{"Autenticado?"}
+    gate -->|"Sim"| active["Agente ativo"]
 
-    triagem -->|"Chamada de ferramenta"| triagem_tools["triagem_tools"]
-    credito -->|"Chamada de ferramenta"| credito_tools["credito_tools"]
-    entrevista -->|"Chamada de ferramenta"| entrevista_tools["entrevista_tools"]
-    cambio -->|"Chamada de ferramenta"| cambio_tools["cambio_tools"]
+    subgraph agents["Especialistas e ToolNodes isolados"]
+        triagem["triagem"] -->|"Tool"| triagem_tools["triagem_tools"]
+        credito["credito"] -->|"Tool"| credito_tools["credito_tools"]
+        entrevista["entrevista"] -->|"Tool"| entrevista_tools["entrevista_tools"]
+        cambio["cambio"] -->|"Tool"| cambio_tools["cambio_tools"]
+    end
+
+    gate -->|"Não"| triagem
+    active --> triagem
+    active --> credito
+    active --> entrevista
+    active --> cambio
 
     triagem_tools --> route
-    credito_tools -->|"Consulta, transição ou encerramento"| route
-    credito_tools -->|"Pedido de aumento válido"| pause["Pausa antes de gravar (interrupt())"]
-    pause -->|"Confirmação ou cancelamento no mesmo thread_id"| resume["Command(resume=...)"]
-    resume -->|"Conclui a ferramenta de aumento"| route
-    entrevista_tools -->|"Após salvar o score, active_agent = credito"| route
+    credito_tools -->|"Demais tools"| route
+    credito_tools -->|"Aumento válido"| pause["Pausa HITL (interrupt())"]
+    pause -->|"Confirma / cancela"| resume["Command(resume=...)"]
+    resume --> route
+    entrevista_tools -->|"Score salvo → credito"| route
     cambio_tools --> route
 
-    triagem --> finish
-    credito --> finish
-    entrevista --> finish
-    cambio --> finish
+    triagem -.->|"Resposta final"| finish
+    credito -.->|"Resposta final"| finish
+    entrevista -.->|"Resposta final"| finish
+    cambio -.->|"Resposta final"| finish
+
+    classDef terminal fill:#e2e8f0,stroke:#475569,stroke-width:1.5px,color:#0f172a
+    classDef router fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#2e1065
+    classDef agent fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a
+    classDef tool fill:#d1fae5,stroke:#059669,stroke-width:1.5px,color:#064e3b
+    classDef hitl fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+
+    class start,finish terminal
+    class route,gate,active router
+    class triagem,credito,entrevista,cambio agent
+    class triagem_tools,credito_tools,entrevista_tools,cambio_tools tool
+    class pause,resume hitl
+    style agents fill:none,stroke:#94a3b8,stroke-width:1.5px,stroke-dasharray: 5 5
 ```
 
 O turno termina quando o agente responde sem chamar ferramentas. Após encerramento por ferramenta ou pela 3ª falha consecutiva de autenticação, o nó ativo produz a despedida com ferramentas desabilitadas.
@@ -60,23 +76,45 @@ Todos os agentes têm `encerrar_atendimento`; os três especialistas também tê
 
 ```mermaid
 flowchart LR
-    user["Cliente"] <--> ui["Streamlit UI (ChatClient)"]
+    user(["Cliente"]) <--> ui["Streamlit UI (ChatClient)"]
 
-    subgraph banking["Atendimento bancário"]
+    subgraph banking["Atendimento bancário (PII e ./data)"]
         api["FastAPI (api)"] <--> runtime["ConversationRuntime (LangGraph + InMemorySaver)"]
         runtime <--> credit["CreditService"]
-        credit <--> data["CSV (./data)"]
-        runtime <--> exchange["Cliente MCP de câmbio (banco_agil.mcp)"]
+        credit <--> data[("CSV (./data)")]
+        runtime <--> exchange["Cliente MCP (banco_agil.mcp)"]
     end
 
-    ui <-->|"HttpChatClient (modo HTTP)"| api
-    ui <-->|"LocalChatClient (modo direto)"| runtime
-    exchange <-->|"Código de moeda / cotação em BRL"| mcp["MCPServer (mcp-exchange, stateless, sem CSV ou PII)"]
-    mcp <-->|"Fonte primária"| awesome["AwesomeAPI"]
-    mcp <-->|"Fallback"| bce["Frankfurter (BCE)"]
+    subgraph mcp_zone["Fronteira MCP (stateless, sem CSV ou PII)"]
+        mcp["MCPServer (mcp-exchange)"]
+    end
 
-    runtime <--> llm["LiteLLM / provedor LLM"]
-    runtime -->|"Traces com mascaramento"| langfuse["Langfuse v4 (opcional)"]
+    ui <-->|"HttpChatClient"| api
+    ui <-->|"LocalChatClient"| runtime
+    exchange <-->|"Moeda / cotação BRL"| mcp
+
+    mcp -->|"Primária"| awesome["AwesomeAPI"]
+    mcp -.->|"Fallback"| bce["Frankfurter (BCE)"]
+
+    runtime <--> llm["LiteLLM / Provedor LLM"]
+    runtime -.->|"Traces mascarados"| langfuse["Langfuse v4 (opcional)"]
+
+    classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#0c4a6e
+    classDef core fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a
+    classDef storage fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#2e1065
+    classDef mcpStyle fill:#d1fae5,stroke:#059669,stroke-width:1.5px,color:#064e3b
+    classDef external fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+    classDef obs fill:#f1f5f9,stroke:#64748b,stroke-width:1.5px,color:#0f172a
+
+    class user,ui client
+    class api,runtime,credit,exchange core
+    class data storage
+    class mcp mcpStyle
+    class awesome,bce,llm external
+    class langfuse obs
+
+    style banking fill:none,stroke:#2563eb,stroke-width:1.5px
+    style mcp_zone fill:none,stroke:#059669,stroke-width:1.5px,stroke-dasharray: 5 5
 ```
 
 A UI fala apenas com o protocolo `ChatClient`; tanto a API quanto o modo direto delegam execução, checkpoints e observabilidade ao `ConversationRuntime`. O serviço `mcp-exchange` é stateless e recebe somente o código de moeda — CPF, data de nascimento, `thread_id` e confirmação de crédito ficam fora do contrato MCP. No Compose, apenas a API monta `./data` e o MCP fica restrito à rede interna.
