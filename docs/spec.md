@@ -94,8 +94,9 @@ score_final = round(max(0, min(1000, score_bruto)))
 
 ### Retorno da Entrevista de Crédito
 - O valor de limite anteriormente desejado é preservado no estado do atendimento durante a entrevista.
-- Se o cliente desistir ou interromper a entrevista antes da conclusão (`voltar_para_triagem`), o valor pendente (`pending_requested_limit`) é limpo deterministicamente para não reabrir pedidos já rejeitados.
-- Ao concluir a entrevista e atualizar o score em `clientes.csv`, o controle retorna ao Agente de Crédito, que informa o novo score e propõe reenviar o pedido com o valor anterior (permitindo ao cliente confirmar ou informar outro valor).
+- Toda Entrevista de Crédito coleta os cinco indicadores do Cliente para a avaliação atual. Em entrevistas subsequentes no mesmo Atendimento, a ferramenta de recálculo aguarda pelo menos um novo turno do Cliente após o início da entrevista. O agente usa apenas os indicadores coletados nessa entrevista.
+- O valor pendente (`pending_requested_limit`) é limpo deterministicamente em qualquer retorno à Triagem via `voltar_para_triagem`, inclusive ao interromper a entrevista, e quando o Cliente cancela a Confirmação de Aumento.
+- Ao concluir a entrevista e atualizar o score em `clientes.csv`, o controle retorna ao Agente de Crédito, que informa o novo score e, se houver um valor pendente, oferece o reenvio para esse valor ou para outro valor informado pelo Cliente. Uma resposta afirmativa à oferta de reenvio abre a Confirmação de Aumento para o valor pendente.
 - Confirmada a submissão, um **novo** pedido é registrado em `solicitacoes_aumento_limite.csv`.
 
 ### Encerramento de Tópico vs. Encerramento de Conversa

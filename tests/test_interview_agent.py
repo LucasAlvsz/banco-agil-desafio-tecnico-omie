@@ -41,13 +41,13 @@ def interview_files(data_dir):
 
 @pytest.fixture
 def start_interview(scripted_model, credit_service, exchange_provider, interview_files):
-    def start(*responses):
+    def start(*responses, active_agent="entrevista"):
         model = scripted_model(responses=list(responses))
         graph = build_graph(model, credit_service, exchange_provider)
         graph.update_state(
             CONFIG,
             {
-                "active_agent": "entrevista",
+                "active_agent": active_agent,
                 "authenticated": True,
                 "client_cpf": ANA,
                 "client_birth_date": BIRTH_DATE,
@@ -142,6 +142,87 @@ def test_score_updates_only_the_authenticated_client_and_hands_off_in_the_same_t
         client.model_copy(update={"score": 590}) if client.cpf == ANA else client
         for client in before
     ]
+    assert csv_rows(requests) == []
+
+
+ALL_ANSWERS_MESSAGE = "Ganho R$ 6.000, sou CLT, gasto R$ 2.000 e não tenho dependentes nem dívidas."
+
+
+def test_first_interview_can_use_indicators_in_the_opening_message(start_interview, credit_service):
+    graph, _ = start_interview(
+        tool_step(call("redirecionar_para_entrevista", "first-interview")),
+        tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
+        AIMessage(content="Seu novo score é 590."),
+        active_agent="credito",
+    )
+
+    result = turn(graph, f"Quero fazer a entrevista. {ALL_ANSWERS_MESSAGE}")
+
+    assert result.telemetry.agent_route == ("credito", "entrevista", "credito")
+    assert credit_service.get_client(ANA).score == 590
+
+
+@pytest.mark.parametrize("first_interview", ["completed", "interrupted", "already_started"])
+def test_second_interview_requires_a_new_client_turn_before_scoring(
+    start_interview, interview_files, credit_service, monkeypatch, first_interview
+):
+    clients, requests = interview_files
+    first_steps = []
+    if first_interview != "already_started":
+        first_steps = [
+            tool_step(call("redirecionar_para_entrevista", "first-interview")),
+            AIMessage(content="Quais são os cinco indicadores financeiros?"),
+        ]
+    if first_interview == "interrupted":
+        first_steps += [
+            tool_step(call("voltar_para_triagem", "back")),
+            AIMessage(content="Tudo bem. Como posso ajudar?"),
+            tool_step(call("redirecionar_para_credito", "credit")),
+            AIMessage(content="Posso ajudar com seu limite de crédito."),
+        ]
+    else:
+        first_steps += [
+            tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
+            AIMessage(content="Seu novo score é 590."),
+        ]
+    graph, _ = start_interview(
+        *first_steps,
+        tool_step(call("redirecionar_para_entrevista", "second-interview")),
+        tool_step(call(SCORE_TOOL, "stale-score", **ANSWERS)),
+        AIMessage(content="Quais são seus indicadores atualizados?"),
+        tool_step(call(SCORE_TOOL, "new-score", **(ANSWERS | {"renda_mensal": 15000}))),
+        AIMessage(content="Seu novo score é 725."),
+        active_agent="entrevista" if first_interview == "already_started" else "credito",
+    )
+    if first_interview != "already_started":
+        assert turn(graph).active_agent == "entrevista"
+    if first_interview == "interrupted":
+        assert (
+            turn(graph, "Ganho R$ 6.000, mas prefiro parar a entrevista.").active_agent == "triagem"
+        )
+        assert turn(graph, "Quero falar do meu limite.").active_agent == "credito"
+    else:
+        assert turn(graph, ALL_ANSWERS_MESSAGE).active_agent == "credito"
+
+    recalculate = Mock(wraps=credit_service.recalculate_score)
+    monkeypatch.setattr(credit_service, "recalculate_score", recalculate)
+    before = clients.read_bytes()
+
+    reentry = turn(graph, "Quero fazer outra entrevista de crédito.")
+
+    assert reentry.active_agent == "entrevista"
+    assert "Pergunte ao cliente os cinco indicadores financeiros atualizados" in (
+        tool_messages(graph)["stale-score"].text
+    )
+    recalculate.assert_not_called()
+    assert clients.read_bytes() == before
+
+    result = turn(graph, ALL_ANSWERS_MESSAGE.replace("6.000", "15.000"))
+
+    assert result.telemetry.agent_route == ("entrevista", "credito")
+    assert credit_service.get_client(ANA).score == 725
+    recalculate.assert_called_once()
+    assert clients.read_bytes() != before
     assert csv_rows(requests) == []
 
 
@@ -460,8 +541,9 @@ def test_interview_answers_preserve_the_rejected_amount_without_reopening_the_re
     assert turn(graph, "sim por favor").active_agent == "entrevista"
     handoff = tool_messages(graph)["interview"]
     assert handoff.text == (
-        "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores financeiros reais "
-        "antes de concluir a avaliação, sem inventar dados e sem sair da entrevista."
+        "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores financeiros "
+        "reais desta entrevista antes de concluir a avaliação, sem reutilizar dados de "
+        "entrevistas anteriores, sem inventar dados e sem sair da entrevista."
     )
     assert model.calls[-1]["messages"][-1] == handoff
     assert_private(handoff.model_dump_json())

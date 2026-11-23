@@ -408,6 +408,7 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "nem trate valores de renda ou despesas como novo limite",
                 "outro assunto fora de crédito depois da consulta de limite",
                 "consulte o limite primeiro e então acione voltar_para_triagem imediatamente",
+                "aceitar ou pedir para fazer uma entrevista de crédito",
             ),
         ),
         (
@@ -422,6 +423,8 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "apenas em texto, sem acionar ferramentas",
                 "valores monetários sem rótulo",
                 "considerando o contexto da pergunta anterior",
+                "nesta entrevista atual",
+                "nunca reutilize dados de entrevistas anteriores",
             ),
         ),
         (
@@ -430,6 +433,8 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "Atue apenas na consulta de cotação de câmbio",
                 "Nunca informe nem invente cotações sem consultar_cotacao",
                 "nunca responda sobre limite ou score de crédito",
+                "Se o cliente pedir na mensagem atual para falar de outro assunto "
+                "depois da cotação",
                 "acione voltar_para_triagem imediatamente",
             ),
         ),
@@ -440,6 +445,13 @@ def test_specialist_prompts_limit_scope(build_prompt, requirements):
 
     for requirement in requirements:
         assert requirement in prompt
+
+
+def test_credit_prompt_resubmits_the_rejected_amount_on_a_simple_yes():
+    prompt = build_credit_prompt({"messages": [], "pending_requested_limit": 10000})
+
+    assert "resposta afirmativa simples" in prompt
+    assert "confirma o reenvio para esse último valor" in prompt
 
 
 def test_authenticated_triage_routes_only_available_services():

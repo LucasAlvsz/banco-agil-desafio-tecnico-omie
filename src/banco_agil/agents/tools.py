@@ -1,11 +1,12 @@
 import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from math import isfinite
 from typing import Any, Literal
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command, interrupt
@@ -25,6 +26,8 @@ from banco_agil.domain.services import CreditService
 logger = logging.getLogger(__name__)
 MAX_AUTH_ATTEMPTS = 3
 _HANDOFF_EXTRA = "handoff"
+_INTERVIEW_STARTED_PREFIX = "Entrevista de crédito iniciada."
+_SCORE_UPDATED_PREFIX = "Novo score:"
 
 
 def _tool_result(
@@ -154,7 +157,9 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
             ).to_interrupt_payload()
         )
         if not LimitIncreaseDecision.is_approved(decision):
-            return _tool_result(runtime, "Pedido de aumento de limite cancelado.")
+            return _tool_result(
+                runtime, "Pedido de aumento de limite cancelado.", pending_requested_limit=None
+            )
 
         try:
             result = credit_service.process_limit_increase(cpf, novo_limite)
@@ -177,6 +182,34 @@ def build_credit_tools(credit_service: CreditService) -> list[BaseTool]:
     return [consultar_limite, solicitar_aumento_limite, redirecionar_para_entrevista]
 
 
+def _needs_fresh_interview_answers(messages: Sequence[AnyMessage]) -> bool:
+    call_names: dict[str, str] = {}
+    interview_starts: list[int] = []
+    prior_score_updated = False
+    for index, message in enumerate(messages):
+        if isinstance(message, AIMessage):
+            for call in message.tool_calls:
+                if call_id := call.get("id"):
+                    call_names[call_id] = call["name"]
+        elif isinstance(message, ToolMessage) and message.status != "error":
+            name = call_names.get(message.tool_call_id)
+            # Persisted business failures can also have the default success status.
+            if name == redirecionar_para_entrevista.name and message.text.startswith(
+                _INTERVIEW_STARTED_PREFIX
+            ):
+                interview_starts.append(index)
+            elif name == "calcular_e_atualizar_score" and message.text.startswith(
+                _SCORE_UPDATED_PREFIX
+            ):
+                prior_score_updated = True
+
+    if not interview_starts or not (prior_score_updated or len(interview_starts) > 1):
+        return False
+    return not any(
+        isinstance(message, HumanMessage) for message in messages[interview_starts[-1] + 1 :]
+    )
+
+
 def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
     @tool(extras={_HANDOFF_EXTRA: True})
     def calcular_e_atualizar_score(
@@ -193,6 +226,14 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
         """
         if isinstance(auth := _require_authenticated_client(runtime), Command):
             return auth
+        if _needs_fresh_interview_answers(runtime.state.get("messages", ())):
+            return _tool_result(
+                runtime,
+                "Uma nova entrevista de crédito foi iniciada. Pergunte ao cliente os cinco "
+                "indicadores financeiros atualizados antes de calcular o novo score, sem "
+                "reutilizar dados de entrevistas anteriores.",
+                active_agent="entrevista",
+            )
         cpf = auth
         try:
             client = credit_service.recalculate_score(
@@ -220,8 +261,8 @@ def build_interview_tools(credit_service: CreditService) -> list[BaseTool]:
             )
         return _tool_result(
             runtime,
-            f"Novo score: {client.score}. Responda em texto ao cliente informando o novo score "
-            "e retome o atendimento de crédito sem acionar ferramentas agora.",
+            f"{_SCORE_UPDATED_PREFIX} {client.score}. Responda em texto ao cliente informando "
+            "o novo score e retome o atendimento de crédito sem acionar ferramentas agora.",
             active_agent="credito",
         )
 
@@ -278,8 +319,9 @@ def _redirect(
         return auth
     messages = {
         "entrevista": (
-            "Entrevista de crédito iniciada. Colete do cliente os cinco indicadores financeiros "
-            "reais antes de concluir a avaliação, sem inventar dados e sem sair da entrevista."
+            f"{_INTERVIEW_STARTED_PREFIX} Colete do cliente os cinco indicadores "
+            "financeiros reais desta entrevista antes de concluir a avaliação, sem reutilizar "
+            "dados de entrevistas anteriores, sem inventar dados e sem sair da entrevista."
         ),
         "credito": "Atendimento de crédito ativo. Atenda apenas a solicitação atual do cliente.",
         "cambio": "Atendimento de câmbio ativo. Consulte a cotação solicitada pelo cliente.",
@@ -298,7 +340,7 @@ def redirecionar_para_credito(runtime: ToolRuntime[None, ConversationState]) -> 
 
 @tool(extras={_HANDOFF_EXTRA: True})
 def redirecionar_para_entrevista(runtime: ToolRuntime[None, ConversationState]) -> Command[Any]:
-    """Continua para a entrevista de crédito se o cliente autenticado aceitar a oferta."""
+    """Inicia a entrevista de crédito quando o cliente autenticado a solicita ou aceita a oferta."""
     return _redirect(runtime, "entrevista")
 
 
@@ -315,17 +357,16 @@ def voltar_para_triagem(runtime: ToolRuntime[None, ConversationState]) -> Comman
     Não chame apenas por o cliente informar valores em reais, renda, despesas, emprego,
     dependentes ou dívidas durante a entrevista.
     """
-    if runtime.state.get("active_agent") == "entrevista":
-        return _tool_result(
-            runtime,
-            "Entrevista de crédito interrompida antes da conclusão. Retomando a triagem para "
-            "atender apenas a intenção atual do cliente.",
-            active_agent="triagem",
-            pending_requested_limit=None,
-        )
+    message = (
+        "Entrevista de crédito interrompida antes da conclusão. Retomando a triagem para "
+        "atender apenas a intenção atual do cliente."
+        if runtime.state.get("active_agent") == "entrevista"
+        else "Retomando a triagem. Inclua resultados já obtidos neste turno e atenda apenas a "
+        "intenção atual do cliente."
+    )
     return _tool_result(
         runtime,
-        "Retomando a triagem. Inclua resultados já obtidos neste turno e atenda apenas a "
-        "intenção atual do cliente.",
+        message,
         active_agent="triagem",
+        pending_requested_limit=None,
     )

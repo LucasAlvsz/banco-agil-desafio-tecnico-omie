@@ -1075,5 +1075,331 @@
         }
       }
     ]
+  },
+  {
+    "id": "credit_second_interview_after_second_rejection",
+    "turns": [
+      {
+        "message": "Meu CPF é 12345678901, nasci em 14/05/1990. Quero aumentar meu limite para R$ 10.000.",
+        "script": [
+          {
+            "tool": "autenticar_cliente",
+            "args": {
+              "cpf": "12345678901",
+              "data_nascimento": "14/05/1990"
+            }
+          },
+          {
+            "tool": "redirecionar_para_credito"
+          },
+          {
+            "tool": "solicitar_aumento_limite",
+            "args": {
+              "novo_limite": 10000
+            }
+          }
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 10000,
+          "client_limit": 2500,
+          "client_score": 420,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Quer fazer uma entrevista de crédito?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 2500,
+          "client_score": 420,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"],
+          "tool_contains": ["rejeitado"]
+        }
+      },
+      {
+        "message": "Sim, quero fazer a entrevista.",
+        "script": [
+          {
+            "tool": "redirecionar_para_entrevista"
+          },
+          "Informe sua renda, tipo de emprego, despesas fixas, dependentes e se tem dívidas."
+        ],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["credito", "entrevista"],
+          "authenticated": true,
+          "tools": ["redirecionar_para_entrevista"],
+          "client_limit": 2500,
+          "client_score": 420,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Ganho R$ 2.000, sou autônoma, gasto R$ 1.500, tenho 1 dependente e tenho dívidas.",
+        "script": [
+          {
+            "tool": "calcular_e_atualizar_score",
+            "args": {
+              "renda_mensal": 2000,
+              "tipo_emprego": "autônomo",
+              "despesas_fixas": 1500,
+              "num_dependentes": 1,
+              "tem_dividas": "sim"
+            }
+          },
+          "Seu novo score é 220. Quer reenviar o pedido de R$ 10.000 ou informar outro valor?"
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["entrevista", "credito"],
+          "authenticated": true,
+          "tools": ["calcular_e_atualizar_score"],
+          "client_limit": 2500,
+          "client_score": 220,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "reply_patterns": ["220"],
+          "unchanged": ["score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Sim",
+        "script": [
+          {
+            "tool": "solicitar_aumento_limite",
+            "args": {
+              "novo_limite": 10000
+            }
+          }
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 2500,
+          "client_score": 220,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "confirmation_amount": 10000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["O pedido foi rejeitado. Quer fazer uma entrevista de crédito?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 2500,
+          "client_score": 220,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "unchanged": ["clientes.csv", "score_limite.csv"],
+          "tool_contains": ["rejeitado"]
+        }
+      },
+      {
+        "message": "Quero fazer outra entrevista de crédito.",
+        "script": [
+          {
+            "tool": "redirecionar_para_entrevista"
+          },
+          "Informe sua renda, tipo de emprego, despesas fixas, dependentes e se tem dívidas."
+        ],
+        "expect": {
+          "active_agent": "entrevista",
+          "route": ["credito", "entrevista"],
+          "authenticated": true,
+          "tools": ["redirecionar_para_entrevista"],
+          "client_limit": 2500,
+          "client_score": 220,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "reply_not_contains": ["220", "calcular_e_atualizar_score"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Agora ganho R$ 15.000, sou CLT, gasto R$ 1.000, sem dependentes e sem dívidas.",
+        "script": [
+          {
+            "tool": "calcular_e_atualizar_score",
+            "args": {
+              "renda_mensal": 15000,
+              "tipo_emprego": "formal",
+              "despesas_fixas": 1000,
+              "num_dependentes": 0,
+              "tem_dividas": "não"
+            }
+          },
+          "Seu novo score é 950. Quer reenviar o pedido de R$ 10.000 ou informar outro valor?"
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["entrevista", "credito"],
+          "authenticated": true,
+          "tools": ["calcular_e_atualizar_score"],
+          "client_limit": 2500,
+          "client_score": 950,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "reply_patterns": ["950"],
+          "unchanged": ["score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "message": "Sim",
+        "script": [
+          {
+            "tool": "solicitar_aumento_limite",
+            "args": {
+              "novo_limite": 10000
+            }
+          }
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 2500,
+          "client_score": 950,
+          "pending_requested_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            }
+          ],
+          "confirmation_amount": 10000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["Pedido aprovado. Seu novo limite é R$ 10.000."],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 10000,
+          "client_score": 950,
+          "pending_requested_limit": null,
+          "requests": [
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "rejeitado"
+            },
+            {
+              "cpf_cliente": "12345678901",
+              "limite_atual": 2500,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "aprovado"
+            }
+          ],
+          "reply_patterns": ["10\\.?000"],
+          "unchanged": ["score_limite.csv"]
+        }
+      }
+    ]
   }
 ]

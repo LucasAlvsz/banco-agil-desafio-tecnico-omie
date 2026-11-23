@@ -54,8 +54,9 @@ def test_dataset_and_offline_evals_are_complete_and_preserve_seeds(monkeypatch):
     original = {path: path.read_bytes() for path in DATA_DIR.glob("*.csv")}
     scenarios = load_scenarios()
     scenario_ids = {item.id for item in scenarios}
-    assert len(scenarios) >= 21 and len(scenarios) == len(scenario_ids)
+    assert len(scenarios) >= 22 and len(scenarios) == len(scenario_ids)
     assert "credit_approved_then_exchange_quote" in scenario_ids
+    assert "credit_second_interview_after_second_rejection" in scenario_ids
     report = run_evals(settings=Settings(data_dir=DATA_DIR))
     assert report.total_scenarios == report.passed_scenarios == len(scenarios)
     assert report.pass_rate == report.route_accuracy == 1.0

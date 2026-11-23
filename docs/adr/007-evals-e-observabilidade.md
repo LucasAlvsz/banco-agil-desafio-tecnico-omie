@@ -70,9 +70,10 @@ estado dos CSVs via `list_all()` nos repositórios concretos.
 
 - **Data:** 2026-11-23
 
-A suíte declarativa em `evals/scenarios.json` foi expandida para 21 cenários (incluindo
-transições entre especialistas como `credito → triagem → cambio` e interrupções de
-entrevista), com suporte a `reply_patterns`, `reply_not_contains`, diagnósticos
+A suíte declarativa em `evals/scenarios.json` foi expandida para 22 cenários, incluindo
+transições entre especialistas como `credito → triagem → cambio`, interrupções da
+Entrevista de Crédito e uma segunda entrevista no mesmo Atendimento após nova rejeição.
+Os cenários usam `reply_patterns`, `reply_not_contains`, diagnósticos
 detalhados sem PII por falha de turno e filtros de CLI (`--scenario` e `--runs`) para
 validação seletiva nos modos offline e `live`. Além disso, `langchain>=1.0.0,<2` foi
 declarada explicitamente em `pyproject.toml` por exigência de importação em runtime do

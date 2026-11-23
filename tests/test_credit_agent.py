@@ -201,6 +201,7 @@ def test_pending_turn_is_preserved_until_canceled(
     process = Mock(wraps=credit_service.process_limit_increase)
     monkeypatch.setattr(credit_service, "process_limit_increase", process)
     graph, model = credit_session(increase(6000), AIMessage(content="Pedido cancelado."))
+    graph.update_state(CONFIG, {"pending_requested_limit": 6000}, as_node="triagem")
     original = csv_bytes(credit_files)
 
     initial = turn(graph)
@@ -231,6 +232,7 @@ def test_pending_turn_is_preserved_until_canceled(
     assert "cancelado" in last_tool(graph).text
     assert result.pending_confirmation is None
     assert not graph.get_state(CONFIG).interrupts
+    assert graph.get_state(CONFIG).values["pending_requested_limit"] is None
     assert csv_bytes(credit_files) == original
     process.assert_not_called()
     assert resume_turn(graph, thread_id=THREAD, approved=True).reply == NO_CONFIRMATION_REPLY
@@ -336,6 +338,29 @@ def test_rejection_preserves_the_amount_and_hands_off_to_interview(credit_sessio
         "encerrar_atendimento",
     }
     assert graph.get_state(CONFIG).values["pending_requested_limit"] == 6000
+
+
+def test_leaving_credit_for_triage_clears_the_rejected_amount(credit_session, credit_files):
+    graph, model = credit_session(
+        tool_step(call("voltar_para_triagem", "back")),
+        AIMessage(content="Não posso ajudar com Pix. Como posso ajudar?"),
+        tool_step(call("redirecionar_para_credito", "credit")),
+        tool_step(call("consultar_limite", "limit")),
+        AIMessage(content="Seu limite é de R$ 2.500."),
+    )
+    graph.update_state(CONFIG, {"pending_requested_limit": 6000}, as_node="triagem")
+    original = csv_bytes(credit_files)
+
+    result = turn(graph, "Agora quero fazer um Pix.")
+
+    assert result.telemetry.agent_route == ("credito", "triagem")
+    assert graph.get_state(CONFIG).values["pending_requested_limit"] is None
+
+    result = turn(graph, "Agora quero consultar meu limite de crédito.")
+
+    assert result.telemetry.agent_route == ("triagem", "credito")
+    assert "O último valor solicitado" not in model.calls[-1]["messages"][0].text
+    assert csv_bytes(credit_files) == original
 
 
 def test_limit_is_revalidated_when_resuming(credit_session, credit_service, credit_files):
