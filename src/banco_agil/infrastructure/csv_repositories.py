@@ -30,7 +30,7 @@ class CsvClientRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def _clients(self) -> list[Client]:
+    def list_all(self) -> list[Client]:
         clients = _read(self.path, Client)
         if len({client.cpf for client in clients}) != len(clients):
             raise PersistenceError("Cadastro CSV duplicado")
@@ -38,13 +38,13 @@ class CsvClientRepository:
 
     def get(self, cpf: str) -> Client:
         cpf = normalize_cpf(cpf)
-        for client in self._clients():
+        for client in self.list_all():
             if client.cpf == cpf:
                 return client
         raise ClientNotFoundError("Cliente não encontrado")
 
     def update(self, client: Client) -> None:
-        clients = self._clients()
+        clients = self.list_all()
         if not any(existing.cpf == client.cpf for existing in clients):
             raise ClientNotFoundError("Cliente não encontrado")
         temporary: Path | None = None
@@ -83,6 +83,14 @@ class CsvScoreLimitRepository:
 class CsvLimitRequestRepository:
     def __init__(self, path: Path) -> None:
         self.path = path
+
+    def list_all(self) -> list[LimitIncreaseRequest]:
+        try:
+            if not self.path.exists() or self.path.stat().st_size == 0:
+                return []
+        except OSError:
+            raise PersistenceError("Não foi possível ler os dados CSV") from None
+        return _read(self.path, LimitIncreaseRequest)
 
     def append(self, request: LimitIncreaseRequest) -> None:
         try:

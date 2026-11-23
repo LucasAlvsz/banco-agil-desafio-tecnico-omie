@@ -12,6 +12,10 @@ from banco_agil.infrastructure.csv_repositories import (
     CsvScoreLimitRepository,
 )
 
+LIMIT_REQUEST_HEADER = (
+    "cpf_cliente,data_hora_solicitacao,limite_atual,novo_limite_solicitado,status_pedido\n"
+)
+
 
 @pytest.fixture
 def clients(tmp_path):
@@ -22,6 +26,13 @@ def clients(tmp_path):
         "98765432100,Carlos,1985-11-22,5000.00,720\n"
     )
     return CsvClientRepository(path)
+
+
+def test_lists_all_clients_as_domain_models(clients):
+    ana, carlos = clients.list_all()
+    assert isinstance(ana, Client)
+    assert isinstance(carlos, Client)
+    assert (ana.cpf, carlos.cpf) == ("12345678901", "98765432100")
 
 
 def test_client_update(clients):
@@ -64,7 +75,7 @@ def test_corrupt_clients(tmp_path, contents):
     if contents is not None:
         path.write_text(contents)
     with pytest.raises(PersistenceError) as error:
-        CsvClientRepository(path).get("12345678901")
+        CsvClientRepository(path).list_all()
     assert "12345678901" not in str(error.value)
     assert error.value.__suppress_context__
 
@@ -95,7 +106,9 @@ def test_append(tmp_path, empty):
     ).pedido
     repo.append(request)
     first = path.read_bytes()
-    repo.append(request)
+    second_request = request.model_copy(update={"novo_limite_solicitado": 7000})
+    repo.append(second_request)
+    assert repo.list_all() == [request, second_request]
     assert path.read_bytes().startswith(first)
     with path.open() as stream:
         rows = list(csv.DictReader(stream))
@@ -112,8 +125,43 @@ def test_append(tmp_path, empty):
 def test_duplicate_clients(clients):
     with clients.path.open("a") as stream:
         stream.write("12345678901,Ana,1990-05-14,2500.00,420\n")
-    with pytest.raises(PersistenceError):
-        clients.get("12345678901")
+    with pytest.raises(PersistenceError, match="Cadastro CSV duplicado"):
+        clients.list_all()
+
+
+@pytest.mark.parametrize("contents", [None, "", LIMIT_REQUEST_HEADER])
+def test_lists_no_requests_before_the_first_append(tmp_path, contents):
+    path = tmp_path / "requests.csv"
+    if contents is not None:
+        path.write_text(contents)
+    assert CsvLimitRequestRepository(path).list_all() == []
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "wrong,header\n",
+        LIMIT_REQUEST_HEADER + "12345678901,2026-01-01T00:00:00+00:00,2500,6000,wrong\n",
+        LIMIT_REQUEST_HEADER + "12345678901,2026-01-01T00:00:00+00:00,2500,6000\n",
+    ],
+)
+def test_rejects_corrupt_limit_request_csv(tmp_path, contents):
+    path = tmp_path / "requests.csv"
+    path.write_text(contents)
+    with pytest.raises(PersistenceError, match="Não foi possível ler os dados CSV"):
+        CsvLimitRequestRepository(path).list_all()
+
+
+def test_lists_limit_requests_with_safe_error_on_stat_failure(tmp_path):
+    path = tmp_path / "requests.csv"
+    path.touch()
+    repo = CsvLimitRequestRepository(path)
+    with (
+        patch.object(Path, "stat", side_effect=PermissionError("12345678901")),
+        pytest.raises(PersistenceError, match="^Não foi possível ler os dados CSV$") as error,
+    ):
+        repo.list_all()
+    assert error.value.__suppress_context__
 
 
 def test_append_write_failure(tmp_path):
