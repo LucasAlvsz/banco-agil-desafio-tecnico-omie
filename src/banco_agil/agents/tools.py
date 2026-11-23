@@ -27,10 +27,6 @@ logger = logging.getLogger(__name__)
 MAX_AUTH_ATTEMPTS = 3
 _HANDOFF_EXTRA = "handoff"
 type _InterviewEvent = Literal["interview_started", "score_updated"]
-_LEGACY_INTERVIEW_RESULTS: dict[str, tuple[_InterviewEvent, str]] = {
-    "redirecionar_para_entrevista": ("interview_started", "Entrevista de crédito iniciada."),
-    "calcular_e_atualizar_score": ("score_updated", "Novo score:"),
-}
 
 
 def _tool_result(
@@ -200,18 +196,10 @@ def _needs_fresh_interview_answers(messages: Sequence[AnyMessage]) -> bool:
         if isinstance(message, HumanMessage):
             awaiting_answers = False
         elif isinstance(message, ToolMessage) and message.status != "error":
-            event = message.artifact
-            # Older checkpoints record successful interview events only in tool result text.
-            if event is None and (
-                legacy_result := _LEGACY_INTERVIEW_RESULTS.get(message.name or "")
-            ):
-                legacy_event, prefix = legacy_result
-                if message.text.startswith(prefix):
-                    event = legacy_event
-            if event == "interview_started":
+            if message.artifact == "interview_started":
                 awaiting_answers = interview_started
                 interview_started = True
-            elif event == "score_updated":
+            elif message.artifact == "score_updated":
                 interview_started = True
     return awaiting_answers
 

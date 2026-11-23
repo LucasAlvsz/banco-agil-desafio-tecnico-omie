@@ -410,6 +410,8 @@ def test_agent_prompts_enforce_shared_scope_and_privacy(build_prompt):
                 "outro assunto fora de crédito depois da consulta de limite",
                 "consulte o limite primeiro e então acione voltar_para_triagem imediatamente",
                 "aceitar ou pedir para fazer uma entrevista de crédito",
+                "Se não houver pedido pendente, encerre o tópico perguntando se pode ajudar em "
+                "outro assunto",
             ),
         ),
         (

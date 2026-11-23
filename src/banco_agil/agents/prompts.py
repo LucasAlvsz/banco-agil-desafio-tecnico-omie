@@ -55,7 +55,8 @@ def build_credit_prompt(state: ConversationState) -> str:
         "cliente confirmar que quer enviar o pedido. Uma resposta afirmativa simples "
         "(como 'sim') à pergunta de reenvio confirma o reenvio para esse último valor."
         if requested_limit is not None
-        else ""
+        else " Se não houver pedido pendente, encerre o tópico perguntando se pode ajudar em "
+        "outro assunto."
     )
     return (
         f"{BASE_PROMPT} Atue apenas em consulta e aumento de limite de crédito e no "

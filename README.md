@@ -6,7 +6,7 @@ Atendimento bancário digital multiagente para autenticação, consulta e aument
 
 O LLM conduz a conversa e aciona ferramentas; código determinístico valida identidade e autorização, calcula o score, avalia pedidos e persiste os dados. Consulte a [especificação do produto](docs/spec.md) para regras e contratos e o [glossário](GLOSSARY.md) para o vocabulário de domínio.
 
-**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **575 testes** (99% de cobertura), `mypy --strict` e **22/22 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
+**Stack e verificação:** Python 3.12, LangGraph v1, LiteLLM, Pydantic v2, FastAPI, Streamlit, SDK MCP v2 (`mcp==2.3.0`), Langfuse v4 opcional e Docker. Suíte determinística com **573 testes** (99% de cobertura), `mypy --strict` e **22/22 cenários de avaliação** offline aprovados, com zero vazamentos de PII.
 
 ## Arquitetura do sistema
 
@@ -67,7 +67,7 @@ O turno termina quando o agente responde sem chamar ferramentas. Após encerrame
 | --- | --- | --- |
 | Triagem | `autenticar_cliente`, `redirecionar_para_credito`, `redirecionar_para_cambio` | Após autenticar, encaminha consultas e aumentos de limite e pedidos de Entrevista de Crédito para Crédito, e consultas de cotação para Câmbio. |
 | Crédito | `consultar_limite`, `solicitar_aumento_limite`, `redirecionar_para_entrevista` | Oferece entrevista em caso de rejeição e encaminha se o cliente aceitar ou pedir uma entrevista. Ao concluir o tópico, pergunta se pode ajudar em algo mais. |
-| Entrevista | `calcular_e_atualizar_score` | Volta ao crédito após salvar o score, preservando o valor desejado. |
+| Entrevista | `calcular_e_atualizar_score` | Volta ao Crédito após salvar o score, preservando o valor desejado quando houver pedido pendente. |
 | Câmbio | `consultar_cotacao` | Informa a cotação em BRL e pergunta se pode ajudar em algo mais. |
 
 Todos os agentes têm `encerrar_atendimento`. Os especialistas usam `voltar_para_triagem` quando o cliente muda de assunto, pede outro serviço ou desiste da Entrevista de Crédito. Se o cliente pedir a mudança para depois do resultado na mesma mensagem, o especialista executa primeiro sua ferramenta para que a Triagem inclua o resultado na resposta. Todo retorno à Triagem por essa ferramenta limpa `pending_requested_limit` e preserva a autenticação.
@@ -154,7 +154,7 @@ CPF e data de nascimento são tratados como PII e mascarados em logs, traces e r
 
 - **Autenticação.** Valida CPF (11 dígitos, com ou sem pontuação) e data de nascimento (`DD/MM/AAAA`, `YYYY-MM-DD`, `DD-MM-AAAA` ou `DD.MM.AAAA`), juntos ou em turnos separados, contra `clientes.csv`. Entradas mal formatadas não consomem tentativa; erros usam resposta genérica (“Os dados não conferem”) e a 3ª falha consecutiva encerra o atendimento.
 - **Limite e confirmação humana (HITL).** Consulta o limite vigente e exige valor estritamente superior para aumento, pausando em `interrupt()` antes de persistir. A retomada exige `StrictBool` (`LimitIncreaseDecision`); cancelar encerra sem gravar e confirmar avalia contra a faixa de score.
-- **Entrevista de crédito.** Coleta os 5 indicadores financeiros da entrevista atual, aceitando respostas parciais em múltiplos turnos. Em uma nova entrevista no mesmo Atendimento, o cálculo aguarda um novo turno do cliente. A ferramenta calcula o score em Python (fórmula abaixo), atualiza `clientes.csv` e retorna ao Crédito com o valor anterior para reenvio mediante nova confirmação. O cancelamento da Confirmação de Aumento também limpa `pending_requested_limit`.
+- **Entrevista de crédito.** Coleta os 5 indicadores financeiros da entrevista atual, aceitando respostas parciais em múltiplos turnos. Em uma nova entrevista no mesmo Atendimento, o cálculo aguarda um novo turno do cliente. A ferramenta calcula o score em Python (fórmula abaixo), atualiza `clientes.csv` e retorna ao Crédito informando o novo score (oferecendo reenvio mediante nova confirmação quando houver valor pendente). O cancelamento da Confirmação de Aumento também limpa `pending_requested_limit`.
 - **Câmbio.** Consulta via `mcp.client.Client` → `MCPServer` (`inmemory`, `stdio` ou `streamable_http`), usando AwesomeAPI como fonte primária e Frankfurter (BCE) como fallback com data de referência preservada.
 - **Robustez e privacidade.** Guardrail de entrada (limite de 2.000 caracteres e bloqueio de *prompt injection* antes do LLM), escopo estrito nos prompts, `recursion_limit=16`, `PiiMaskingFilter` global e `contains_pii` para auditoria de CPF e data de nascimento.
 - **Observabilidade e avaliações.** Telemetria local por turno na sidebar (`TurnObservability`), exportação opcional ao Langfuse v4 (`mask` + `mask_otel_spans`) e 22 cenários declarativos (modos offline e `live`, com filtros de execução e diagnósticos detalhados sem PII).

@@ -1,5 +1,6 @@
 import csv
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -148,15 +149,22 @@ def test_score_updates_only_the_authenticated_client_and_hands_off_in_the_same_t
 ALL_ANSWERS_MESSAGE = "Ganho R$ 6.000, sou CLT, gasto R$ 2.000 e não tenho dependentes nem dívidas."
 
 
-@pytest.mark.parametrize("initial_agent", ["triagem", "credito"])
+@pytest.mark.parametrize(
+    ("initial_agent", "entry_steps", "expected_route"),
+    [
+        (
+            "triagem",
+            (tool_step(call("redirecionar_para_credito", "credit")),),
+            ("triagem", "credito", "entrevista", "credito"),
+        ),
+        ("credito", (), ("credito", "entrevista", "credito")),
+    ],
+)
 def test_first_interview_can_use_indicators_in_the_opening_message(
-    start_interview, credit_service, interview_files, initial_agent
+    start_interview, credit_service, interview_files, initial_agent, entry_steps, expected_route
 ):
-    triage_steps = []
-    if initial_agent == "triagem":
-        triage_steps.append(tool_step(call("redirecionar_para_credito", "credit")))
     graph, _ = start_interview(
-        *triage_steps,
+        *entry_steps,
         tool_step(call("redirecionar_para_entrevista", "first-interview")),
         tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
         AIMessage(content="Seu novo score é 590."),
@@ -165,10 +173,7 @@ def test_first_interview_can_use_indicators_in_the_opening_message(
 
     result = turn(graph, f"Quero fazer uma entrevista de crédito. {ALL_ANSWERS_MESSAGE}")
 
-    route = ("credito", "entrevista", "credito")
-    if initial_agent == "triagem":
-        route = ("triagem", *route)
-    assert result.telemetry.agent_route == route
+    assert result.telemetry.agent_route == expected_route
     assert result.reply == "Seu novo score é 590."
     assert result.pending_confirmation is None
     assert credit_service.get_client(ANA).score == 590
@@ -176,71 +181,85 @@ def test_first_interview_can_use_indicators_in_the_opening_message(
     assert csv_rows(requests) == []
 
 
-@pytest.mark.parametrize(
-    ("first_interview", "legacy_checkpoint"),
-    [
-        ("completed", False),
-        ("interrupted", False),
-        ("already_started", False),
-        ("completed", True),
-        ("interrupted", True),
-    ],
-)
+@dataclass(frozen=True)
+class _ReentryCase:
+    active_agent: str
+    first_steps: tuple[AIMessage, ...]
+    setup_turns: tuple[tuple[str, str], ...]
+    reentry_steps: tuple[AIMessage, ...]
+    reentry_route: tuple[str, ...]
+
+
+_REENTRY_CASES = [
+    pytest.param(
+        _ReentryCase(
+            active_agent="credito",
+            first_steps=(
+                tool_step(call("redirecionar_para_entrevista", "first-interview")),
+                AIMessage(content="Quais são os cinco indicadores financeiros?"),
+                tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
+                AIMessage(content="Seu novo score é 590."),
+            ),
+            setup_turns=(
+                ("Quero continuar a entrevista.", "entrevista"),
+                (ALL_ANSWERS_MESSAGE, "credito"),
+            ),
+            reentry_steps=(),
+            reentry_route=("credito", "entrevista"),
+        ),
+        id="completed",
+    ),
+    pytest.param(
+        _ReentryCase(
+            active_agent="credito",
+            first_steps=(
+                tool_step(call("redirecionar_para_entrevista", "first-interview")),
+                AIMessage(content="Quais são os cinco indicadores financeiros?"),
+                tool_step(call("voltar_para_triagem", "back")),
+                AIMessage(content="Tudo bem. Como posso ajudar?"),
+            ),
+            setup_turns=(
+                ("Quero continuar a entrevista.", "entrevista"),
+                ("Ganho R$ 6.000, mas prefiro parar a entrevista.", "triagem"),
+            ),
+            reentry_steps=(tool_step(call("redirecionar_para_credito", "credit")),),
+            reentry_route=("triagem", "credito", "entrevista"),
+        ),
+        id="interrupted",
+    ),
+    pytest.param(
+        _ReentryCase(
+            active_agent="entrevista",
+            first_steps=(
+                tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
+                AIMessage(content="Seu novo score é 590."),
+            ),
+            setup_turns=((ALL_ANSWERS_MESSAGE, "credito"),),
+            reentry_steps=(),
+            reentry_route=("credito", "entrevista"),
+        ),
+        id="already_started",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", _REENTRY_CASES)
 def test_second_interview_requires_a_new_client_turn_before_scoring(
-    start_interview,
-    interview_files,
-    credit_service,
-    monkeypatch,
-    first_interview,
-    legacy_checkpoint,
+    start_interview, interview_files, credit_service, monkeypatch, case
 ):
     clients, requests = interview_files
-    first_steps = []
-    if first_interview != "already_started":
-        first_steps = [
-            tool_step(call("redirecionar_para_entrevista", "first-interview")),
-            AIMessage(content="Quais são os cinco indicadores financeiros?"),
-        ]
-    if first_interview == "interrupted":
-        first_steps += [
-            tool_step(call("voltar_para_triagem", "back")),
-            AIMessage(content="Tudo bem. Como posso ajudar?"),
-            tool_step(call("redirecionar_para_credito", "credit")),
-        ]
-    else:
-        first_steps += [
-            tool_step(call(SCORE_TOOL, "first-score", **ANSWERS)),
-            AIMessage(content="Seu novo score é 590."),
-        ]
     graph, _ = start_interview(
-        *first_steps,
+        *case.first_steps,
+        *case.reentry_steps,
         tool_step(call("redirecionar_para_entrevista", "second-interview")),
         tool_step(call(SCORE_TOOL, "stale-score", **ANSWERS)),
         AIMessage(content="Quais são seus indicadores atualizados?"),
         tool_step(call(SCORE_TOOL, "new-score", **(ANSWERS | {"renda_mensal": 15000}))),
         AIMessage(content="Seu novo score é 725."),
-        active_agent="entrevista" if first_interview == "already_started" else "credito",
+        active_agent=case.active_agent,
     )
-    if first_interview != "already_started":
-        assert turn(graph).active_agent == "entrevista"
-    if first_interview == "interrupted":
-        assert (
-            turn(graph, "Ganho R$ 6.000, mas prefiro parar a entrevista.").active_agent == "triagem"
-        )
-    else:
-        assert turn(graph, ALL_ANSWERS_MESSAGE).active_agent == "credito"
-
-    if legacy_checkpoint:
-        legacy_texts = {
-            "first-interview": "Entrevista de crédito iniciada. Colete os cinco indicadores.",
-            "first-score": "Novo score: 590. Responda em texto ao cliente.",
-        }
-        messages = [
-            message.model_copy(update={"artifact": None, "content": legacy_texts[call_id]})
-            for call_id, message in tool_messages(graph).items()
-            if call_id in legacy_texts
-        ]
-        graph.update_state(CONFIG, {"messages": messages}, as_node="credito")
+    for message, expected_agent in case.setup_turns:
+        assert turn(graph, message).active_agent == expected_agent
 
     recalculate = Mock(wraps=credit_service.recalculate_score)
     monkeypatch.setattr(credit_service, "recalculate_score", recalculate)
@@ -249,8 +268,7 @@ def test_second_interview_requires_a_new_client_turn_before_scoring(
     reentry = turn(graph, "Quero fazer outra entrevista de crédito.")
 
     assert reentry.active_agent == "entrevista"
-    if first_interview == "interrupted":
-        assert reentry.telemetry.agent_route == ("triagem", "credito", "entrevista")
+    assert reentry.telemetry.agent_route == case.reentry_route
     assert "Pergunte ao cliente os cinco indicadores financeiros atualizados" in (
         tool_messages(graph)["stale-score"].text
     )
