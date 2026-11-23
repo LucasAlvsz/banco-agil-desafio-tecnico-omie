@@ -84,7 +84,7 @@ score_bruto = (renda_mensal / (despesas_fixas + 1)) * 30
             + peso_dependentes[num_dependentes]
             + peso_dividas[tem_dividas]
 
-score_final = max(0, min(1000, round(score_bruto)))
+score_final = round(max(0, min(1000, score_bruto)))
 ```
 
 - `peso_emprego`: `{"formal": 300, "autônomo": 200, "desempregado": 0}`
