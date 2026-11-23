@@ -1002,5 +1002,78 @@
         }
       }
     ]
+  },
+  {
+    "id": "credit_approved_then_exchange_quote",
+    "turns": [
+      {
+        "message": "Meu CPF é 98765432100, nasci em 22/11/1985. Quero aumentar meu limite para R$ 10.000.",
+        "script": [
+          {"tool": "autenticar_cliente", "args": {"cpf": "98765432100", "data_nascimento": "22/11/1985"}},
+          {"tool": "redirecionar_para_credito"},
+          {"tool": "solicitar_aumento_limite", "args": {"novo_limite": 10000}}
+        ],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["triagem", "credito"],
+          "authenticated": true,
+          "tools": ["autenticar_cliente", "redirecionar_para_credito", "solicitar_aumento_limite"],
+          "confirmation_amount": 10000,
+          "client_limit": 5000,
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      },
+      {
+        "approve": true,
+        "script": ["Pedido aprovado. Seu novo limite é R$ 10.000,00. Posso ajudar em outro assunto?"],
+        "expect": {
+          "active_agent": "credito",
+          "route": ["credito"],
+          "authenticated": true,
+          "tools": ["solicitar_aumento_limite"],
+          "client_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "98765432100",
+              "limite_atual": 5000,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "aprovado"
+            }
+          ],
+          "tool_contains": ["Pedido aprovado"],
+          "reply_patterns": ["10\\.?000"],
+          "reply_not_contains": ["solicitar_aumento_limite", "voltar_para_triagem"]
+        }
+      },
+      {
+        "message": "Agora quero saber a cotação do dólar.",
+        "script": [
+          {"tool": "voltar_para_triagem"},
+          {"tool": "redirecionar_para_cambio"},
+          {"tool": "consultar_cotacao", "args": {"moeda": "USD"}},
+          "A cotação do dólar está em R$ 5,25 para compra e R$ 5,30 para venda. Posso ajudar em outro assunto?"
+        ],
+        "expect": {
+          "active_agent": "cambio",
+          "route": ["credito", "triagem", "cambio"],
+          "authenticated": true,
+          "tools": ["voltar_para_triagem", "redirecionar_para_cambio", "consultar_cotacao"],
+          "client_limit": 10000,
+          "requests": [
+            {
+              "cpf_cliente": "98765432100",
+              "limite_atual": 5000,
+              "novo_limite_solicitado": 10000,
+              "status_pedido": "aprovado"
+            }
+          ],
+          "tool_contains": ["AwesomeAPI", "R$ 5,25"],
+          "reply_contains": ["R$ 5,25"],
+          "reply_patterns": ["5[,.]25"],
+          "reply_not_contains": ["voltar_para_triagem", "consultar_cotacao"],
+          "unchanged": ["clientes.csv", "score_limite.csv", "solicitacoes_aumento_limite.csv"]
+        }
+      }
+    ]
   }
 ]

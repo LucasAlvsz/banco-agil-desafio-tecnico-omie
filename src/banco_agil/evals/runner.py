@@ -1,7 +1,7 @@
 import os
 import re
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from math import ceil
 from pathlib import Path
@@ -26,6 +26,7 @@ from pydantic import Field, TypeAdapter
 from banco_agil.agents.graph import ERROR_REPLY, TurnResult
 from banco_agil.config import Settings
 from banco_agil.evals.models import (
+    EvalExpectations,
     EvalLimitRequest,
     EvalReport,
     EvalScenario,
@@ -139,12 +140,108 @@ def _aggregate_cost(costs: Sequence[float | None]) -> float | None:
     return None if None in costs else sum(cost for cost in costs if cost is not None)
 
 
-def _eq_check(expected: object, actual: object) -> tuple[bool, str | None]:
-    return (expected == actual, f"esperado={expected}, obtido={actual}")
-
-
 def _request_summary(requests: Sequence[EvalLimitRequest]) -> list[tuple[float, str]]:
     return [(item.novo_limite_solicitado, item.status_pedido.value) for item in requests]
+
+
+def _collect_turn_failures(
+    *,
+    index: int,
+    expect: EvalExpectations,
+    result: TurnResult,
+    state: Mapping[str, Any],
+    route_ok: bool,
+    leaked: bool,
+    tool_text: str,
+    changed_files: Sequence[str],
+    clients: CsvClientRepository,
+    requests: CsvLimitRequestRepository,
+    scripted: EvalScriptedChatModel | None,
+) -> list[str]:
+    failures: list[str] = []
+
+    def check(name: str, passed: bool, detail: str | None = None) -> None:
+        if not passed:
+            suffix = f" ({detail})" if detail is not None else ""
+            failures.append(f"Turno {index} · {name}{suffix}")
+
+    def check_eq(name: str, expected: object, actual: object) -> None:
+        check(name, expected == actual, f"esperado={expected}, obtido={actual}")
+
+    pending = result.pending_confirmation
+    telemetry = result.telemetry
+    confirmation_amount = pending.novo_limite_solicitado if pending else None
+    actual_requests = _list_eval_requests(requests)
+    missing_tool_parts = [part for part in expect.tool_contains if part not in tool_text]
+
+    check("resposta sem erro", result.reply != ERROR_REPLY)
+    check_eq("autenticação", expect.authenticated, result.authenticated)
+    check_eq("encerramento", expect.ended, result.conversation_ended)
+    check_eq("agente ativo", expect.active_agent, result.active_agent)
+    check(
+        "rota",
+        route_ok,
+        f"esperado={list(expect.route)}, obtido={list(telemetry.agent_route)}",
+    )
+    check_eq("guardrail", expect.guardrail_blocked, telemetry.guardrail_blocked)
+    if expect.total_tokens is not None:
+        check_eq("tokens", expect.total_tokens, telemetry.total_tokens)
+    check_eq("confirmação", expect.confirmation_amount, confirmation_amount)
+    check_eq(
+        "valor para reenvio",
+        expect.pending_requested_limit,
+        state.get("pending_requested_limit"),
+    )
+    check(
+        "pedidos no CSV",
+        actual_requests == expect.requests,
+        f"esperado={_request_summary(expect.requests)}, obtido={_request_summary(actual_requests)}",
+    )
+    check("CSVs preservados", not changed_files, f"alterados={changed_files}")
+    check("resposta das ferramentas", not missing_tool_parts, f"ausentes={missing_tool_parts}")
+    check("resposta sem PII", not leaked)
+
+    if expect.reply_patterns:
+        missing_patterns = [
+            pattern
+            for pattern in expect.reply_patterns
+            if re.search(pattern, result.reply, re.IGNORECASE) is None
+        ]
+        check("padrões na resposta", not missing_patterns, f"ausentes={missing_patterns}")
+    if expect.reply_not_contains:
+        reply_lower = result.reply.casefold()
+        forbidden_terms = [
+            term for term in expect.reply_not_contains if term.casefold() in reply_lower
+        ]
+        check(
+            "termos proibidos na resposta",
+            not forbidden_terms,
+            f"encontrados={forbidden_terms}",
+        )
+    if expect.auth_attempts is not None:
+        check_eq(
+            "tentativas de autenticação",
+            expect.auth_attempts,
+            state.get("auth_attempts", 0),
+        )
+    if expect.tools is not None:
+        check_eq("ferramentas chamadas", list(expect.tools), list(telemetry.tools_called))
+    if expect.client_limit is not None or expect.client_score is not None:
+        cpf = state.get("client_cpf")
+        client = clients.get(cpf) if cpf else None
+        if expect.client_limit is not None:
+            check_eq(
+                "limite do cliente",
+                expect.client_limit,
+                client.limite_atual if client else None,
+            )
+        if expect.client_score is not None:
+            check_eq("score do cliente", expect.client_score, client.score if client else None)
+    if scripted is not None:
+        missing_reply_parts = [part for part in expect.reply_contains if part not in result.reply]
+        check("resposta do roteiro", not missing_reply_parts, f"ausentes={missing_reply_parts}")
+        check("roteiro consumido", not scripted.responses, f"restantes={len(scripted.responses)}")
+    return failures
 
 
 def _run_scenario(
@@ -215,109 +312,30 @@ def _run_scenario(
                 if isinstance(message, ToolMessage)
             )
             message_count = len(messages)
-            pending = result.pending_confirmation
-            telemetry = result.telemetry
-            route_ok = telemetry.agent_route == expect.route
+            route_ok = result.telemetry.agent_route == expect.route
             route_matches += route_ok
             leaked = contains_pii(result.reply, cpfs=cpfs, birth_dates=dates)
             pii_leaks += leaked
-
-            confirmation_amount = pending.novo_limite_solicitado if pending else None
-            pending_requested_limit = state.get("pending_requested_limit")
-            actual_requests = _list_eval_requests(requests)
             changed_files = [
                 name for name, data in before.items() if (work_dir / name).read_bytes() != data
             ]
-            missing_tool_parts = [part for part in expect.tool_contains if part not in tool_text]
-            missing_patterns = [
-                pattern
-                for pattern in expect.reply_patterns
-                if re.search(pattern, result.reply, re.IGNORECASE) is None
-            ]
-            reply_lower = result.reply.casefold()
-            forbidden_terms = [
-                term for term in expect.reply_not_contains if term.casefold() in reply_lower
-            ]
-            checks: dict[str, tuple[bool, str | None]] = {
-                "resposta sem erro": (result.reply != ERROR_REPLY, None),
-                "autenticação": _eq_check(expect.authenticated, result.authenticated),
-                "encerramento": _eq_check(expect.ended, result.conversation_ended),
-                "agente ativo": _eq_check(expect.active_agent, result.active_agent),
-                "rota": _eq_check(list(expect.route), list(telemetry.agent_route)),
-                "guardrail": _eq_check(expect.guardrail_blocked, telemetry.guardrail_blocked),
-                "tokens": (
-                    True,
-                    None,
-                )
-                if expect.total_tokens is None
-                else _eq_check(expect.total_tokens, telemetry.total_tokens),
-                "confirmação": _eq_check(expect.confirmation_amount, confirmation_amount),
-                "valor para reenvio": _eq_check(
-                    expect.pending_requested_limit, pending_requested_limit
-                ),
-                "pedidos no CSV": (
-                    actual_requests == expect.requests,
-                    f"esperado={_request_summary(expect.requests)}, "
-                    f"obtido={_request_summary(actual_requests)}",
-                ),
-                "CSVs preservados": (not changed_files, f"alterados={changed_files}"),
-                "resposta das ferramentas": (
-                    not missing_tool_parts,
-                    f"ausentes={missing_tool_parts}",
-                ),
-                "resposta sem PII": (not leaked, None),
-            }
-            if expect.reply_patterns:
-                checks["padrões na resposta"] = (
-                    not missing_patterns,
-                    f"ausentes={missing_patterns}",
-                )
-            if expect.reply_not_contains:
-                checks["termos proibidos na resposta"] = (
-                    not forbidden_terms,
-                    f"encontrados={forbidden_terms}",
-                )
-            if expect.auth_attempts is not None:
-                checks["tentativas de autenticação"] = _eq_check(
-                    expect.auth_attempts, state.get("auth_attempts", 0)
-                )
-            if expect.tools is not None:
-                checks["ferramentas chamadas"] = _eq_check(
-                    list(expect.tools), list(telemetry.tools_called)
-                )
-            if expect.client_limit is not None or expect.client_score is not None:
-                cpf = state.get("client_cpf")
-                client = clients.get(cpf) if cpf else None
-                checks["limite do cliente"] = (
-                    (True, None)
-                    if expect.client_limit is None
-                    else _eq_check(expect.client_limit, client.limite_atual if client else None)
-                )
-                checks["score do cliente"] = (
-                    (True, None)
-                    if expect.client_score is None
-                    else _eq_check(expect.client_score, client.score if client else None)
-                )
-            if scripted is not None:
-                missing_reply_parts = [
-                    part for part in expect.reply_contains if part not in result.reply
-                ]
-                checks["resposta do roteiro"] = (
-                    not missing_reply_parts,
-                    f"ausentes={missing_reply_parts}",
-                )
-                checks["roteiro consumido"] = (
-                    not scripted.responses,
-                    f"restantes={len(scripted.responses)}",
-                )
-                scripted.responses.clear()
             failures.extend(
-                f"Turno {index} · {check} ({detail})"
-                if detail is not None
-                else f"Turno {index} · {check}"
-                for check, (passed, detail) in checks.items()
-                if not passed
+                _collect_turn_failures(
+                    index=index,
+                    expect=expect,
+                    result=result,
+                    state=state,
+                    route_ok=route_ok,
+                    leaked=leaked,
+                    tool_text=tool_text,
+                    changed_files=changed_files,
+                    clients=clients,
+                    requests=requests,
+                    scripted=scripted,
+                )
             )
+            if scripted is not None:
+                scripted.responses.clear()
 
     return ScenarioEvalResult(
         id=scenario_id or scenario.id,

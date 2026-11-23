@@ -53,7 +53,9 @@ def test_dataset_and_offline_evals_are_complete_and_preserve_seeds(monkeypatch):
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
     original = {path: path.read_bytes() for path in DATA_DIR.glob("*.csv")}
     scenarios = load_scenarios()
-    assert len(scenarios) >= 20 and len(scenarios) == len({item.id for item in scenarios})
+    scenario_ids = {item.id for item in scenarios}
+    assert len(scenarios) >= 21 and len(scenarios) == len(scenario_ids)
+    assert "credit_approved_then_exchange_quote" in scenario_ids
     report = run_evals(settings=Settings(data_dir=DATA_DIR))
     assert report.total_scenarios == report.passed_scenarios == len(scenarios)
     assert report.pass_rate == report.route_accuracy == 1.0
@@ -101,9 +103,10 @@ def test_evals_detect_route_mismatch_and_pii_then_exit_one(
 
 
 def test_cli_table_json_and_invalid_dataset(capsys, tmp_path, isolated_logging):
+    total = len(load_scenarios())
     assert main([]) == 0
     table = capsys.readouterr().out
-    assert "Passaram 20/20" in table
+    assert f"Passaram {total}/{total}" in table
     assert "Rotas 100%" in table
     assert "Vazamentos de PII 0" in table
     assert "auth_and_credit_limit_query" in table
