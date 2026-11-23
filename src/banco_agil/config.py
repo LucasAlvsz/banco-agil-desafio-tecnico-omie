@@ -61,6 +61,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_mcp_exchange_url(self) -> Self:
-        if self.mcp_exchange_transport == "streamable_http" and self.mcp_exchange_url is None:
-            raise ValueError("Configure MCP_EXCHANGE_URL para usar streamable_http.")
+        if self.mcp_exchange_transport == "streamable_http":
+            self.resolve_mcp_exchange_url()
         return self
+
+    def resolve_mcp_exchange_url(self) -> str:
+        url = self.mcp_exchange_url
+        if url is None or not url.strip():
+            raise ValueError("Configure MCP_EXCHANGE_URL para usar streamable_http.")
+        return url
