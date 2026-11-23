@@ -3,6 +3,8 @@ from io import StringIO
 
 import pytest
 
+from banco_agil.domain.errors import DomainValidationError
+from banco_agil.infrastructure import privacy
 from banco_agil.infrastructure.privacy import (
     REDACTED_PLACEHOLDER,
     PiiMaskingFilter,
@@ -11,6 +13,42 @@ from banco_agil.infrastructure.privacy import (
     mask_pii,
     mask_pii_data,
 )
+
+
+@pytest.mark.parametrize("text", ["12345678901", "123.456.789-01", "123 456 789 01"])
+def test_contains_pii_detects_known_cpf_in_multiple_formats(text):
+    assert privacy.contains_pii(f"CPF: {text}.", cpfs=[" 123.456.789-01 "])
+
+
+@pytest.mark.parametrize("text", ["1990-05-14", "14/05/1990", "14-05-1990", "14.05.1990"])
+def test_contains_pii_detects_known_birth_date_in_multiple_formats(text):
+    assert privacy.contains_pii(f"Data: 32/05/1990, {text}.", birth_dates=[" 14/05/1990 "])
+
+
+@pytest.mark.parametrize(
+    "text", ["10000000000", "BCE 2026-11-20", "32/05/1990", "Bearer example-token"]
+)
+def test_contains_pii_ignores_values_outside_known_client_pii(text):
+    assert not privacy.contains_pii(text, cpfs={"12345678901"}, birth_dates={"1990-05-14"})
+
+
+def test_contains_pii_with_no_known_client_values():
+    assert not privacy.contains_pii("CPF 123.456.789-01, nascimento 14/05/1990")
+
+
+@pytest.mark.parametrize(
+    ("cpfs", "birth_dates"),
+    [(["CPF inválido"], ["1990-05-14"]), (["12345678901"], ["32/05/1990"])],
+)
+def test_contains_pii_validates_all_known_values_before_matching(cpfs, birth_dates):
+    with pytest.raises(DomainValidationError):
+        privacy.contains_pii(
+            "CPF 123.456.789-01, nascimento 14/05/1990", cpfs=cpfs, birth_dates=birth_dates
+        )
+
+
+def test_patterns_are_private():
+    assert {"CPF_PATTERN", "DATE_PATTERN", "SECRET_PATTERN"}.isdisjoint(vars(privacy))
 
 
 @pytest.mark.parametrize(
